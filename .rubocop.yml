@@ -38,3 +38,7 @@ Layout/LineLength:
   Max: 120
   Exclude:
     - test/**/*
+
+Naming/MethodParameterName:
+  AllowedNames:
+    - ts

@@ -1,0 +1,8 @@
+# Copy to $CONCLAVE_HOME/config.yml (default ~/.conclave/config.yml). Never commit real tokens.
+bot_token: xoxb-your-bot-token
+app_token: xapp-your-app-level-token
+owner_user_id: U0000000000
+shortcut_token: your-shortcut-api-token
+# Optional
+loop_guard_limit: 10
+offline_queue_limit: 50
