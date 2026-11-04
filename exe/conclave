@@ -33,13 +33,21 @@ def run_spike
   Thread.new do
     sleep 3
     transport.send_notification("notifications/claude/channel", SPIKE_MESSAGE)
+  rescue StandardError => e
+    warn "conclave: notification failed: #{e.class}: #{e.message}"
   end
 
   transport.open
 end
 
 case ARGV.first
-when "spike" then run_spike
+when "spike"
+  begin
+    run_spike
+  rescue StandardError => e
+    warn "conclave: transport failed: #{e.class}: #{e.message}"
+    exit 1
+  end
 else
   warn "usage: conclave spike"
   exit 1
