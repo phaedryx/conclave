@@ -8,6 +8,7 @@ end
 require_relative "conclave/addressing"
 require_relative "conclave/agent_name"
 require_relative "conclave/config"
+require_relative "conclave/hub/authority"
 require_relative "conclave/permalink"
 require_relative "conclave/store"
 require_relative "conclave/shortcut/client"
