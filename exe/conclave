@@ -1,0 +1,46 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+require "bundler/setup"
+require_relative "../lib/conclave"
+
+SPIKE_PING = Class.new(MCP::Tool) do
+  tool_name "ping"
+  description "Returns pong"
+  input_schema(properties: {})
+
+  def self.call(**)
+    MCP::Tool::Response.new([{ type: "text", text: "pong" }])
+  end
+end
+
+SPIKE_MESSAGE = {
+  content: "hello from conclave",
+  meta: { sender: "spike", sender_role: "owner" }
+}.freeze
+
+# Spike: proves Claude Code accepts a claude/channel notification from this server.
+def run_spike
+  server = MCP::Server.new(
+    name: "conclave",
+    version: "0.1.0",
+    capabilities: Conclave::Channel::CAPABILITIES,
+    instructions: "Spike: you will receive one channel message.",
+    tools: [SPIKE_PING]
+  )
+  transport = Conclave::Channel::SyncStdioTransport.new(server)
+
+  Thread.new do
+    sleep 3
+    transport.send_notification("notifications/claude/channel", SPIKE_MESSAGE)
+  end
+
+  transport.open
+end
+
+case ARGV.first
+when "spike" then run_spike
+else
+  warn "usage: conclave spike"
+  exit 1
+end
