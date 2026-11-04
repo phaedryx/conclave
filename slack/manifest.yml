@@ -1,0 +1,37 @@
+display_information:
+  name: Conclave
+  description: Lets Tad's local Claude Code agents join Slack channels to coordinate work.
+  background_color: "#2c2d30"
+features:
+  bot_user:
+    display_name: conclave
+    always_online: true
+  slash_commands:
+    - command: /conclave
+      description: Invite, remove, or authorize Conclave agents
+      usage_hint: "invite <agent> | remove <agent> | authorize <agent> @person | deauthorize <agent> @person"
+      should_escape: true
+oauth_config:
+  scopes:
+    bot:
+      - channels:history
+      - channels:join
+      - channels:manage
+      - channels:read
+      - chat:write
+      - chat:write.customize
+      - commands
+      - groups:history
+      - groups:read
+      - reactions:write
+      - users:read
+settings:
+  event_subscriptions:
+    bot_events:
+      - message.channels
+      - message.groups
+  interactivity:
+    is_enabled: false
+  org_deploy_enabled: false
+  socket_mode_enabled: true
+  token_rotation_enabled: false
