@@ -15,8 +15,11 @@ class HandlerTest < Minitest::Test
       @deliveries = []
     end
 
-    def deliver(message)
+    def closed? = false
+
+    def deliver(message) # rubocop:disable Naming/PredicateMethod
       @deliveries << message
+      true
     end
   end
 

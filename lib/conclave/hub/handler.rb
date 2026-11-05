@@ -42,7 +42,7 @@ module Conclave
       def disconnected(connection)
         @lock.synchronize do
           agent = @registered.delete(connection)
-          @agents.unregister(agent) if agent
+          @agents.unregister(agent, connection) if agent
         end
       end
 

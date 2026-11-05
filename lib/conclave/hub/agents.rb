@@ -101,18 +101,24 @@ module Conclave
         @store.drain(name).each { |payload| deliver_online(name, connection, Payload.restore(payload)) }
         :ok
       rescue StandardError
-        unregister(name) # all or nothing: a failed drain must not leave the name taken
+        unregister(name, connection) # all or nothing: a failed drain must not leave the name taken
         raise
       end
 
-      def unregister(name) = @connections.delete(name)
+      # With a connection, deletes only if it is still the one registered under the name.
+      def unregister(name, connection = nil)
+        return @connections.delete(name) if connection.nil?
+
+        @connections.delete(name) if @connections[name].equal?(connection)
+      end
 
       def online?(name) = @connections.key?(name)
 
       def deliver(agent, message)
         connection = @connections[agent]
-        return deliver_online(agent, connection, message) if connection
+        return if connection && !connection.closed? && deliver_online(agent, connection, message)
 
+        unregister(agent, connection) if connection
         record_authority(agent, message)
         @store.enqueue(agent, message, limit: @queue_limit)
         react_offline(message)
@@ -173,7 +179,8 @@ module Conclave
       def post_pause_note(channel_id, thread_key)
         note = "Pausing agent-to-agent messages in this thread after #{@loop_guard_limit} exchanges. " \
                "@tad, reply here to continue."
-        @slack.post_message(channel: channel_id, thread_ts: thread_key, username: NOTE_USERNAME, text: note)
+        response = @slack.post_message(channel: channel_id, thread_ts: thread_key, username: NOTE_USERNAME, text: note)
+        @store.record_post_authority(channel_id, response["ts"], @authority.owner) if response["ts"]
       rescue Slack::Client::Error => e
         Agents.report("pause note failed for #{channel_id}/#{thread_key}: #{e.message}")
       end

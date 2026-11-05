@@ -23,17 +23,21 @@ module Conclave
 
         def deliver(message) = write({ op: "deliver", message: message })
 
-        # Never blocks.
+        def closed? = @outbox.closed?
+
+        # Never blocks. True when queued, false when the connection is closed or just overflowed.
         def write(hash)
-          return if @outbox.closed?
+          return false if @outbox.closed?
 
           if @outbox.size >= OUTBOX_LIMIT
             Agents.report("client outbox overflow; closing connection")
-            return close
+            close
+            return false
           end
           @outbox.push(hash)
+          true
         rescue ClosedQueueError
-          nil
+          false
         end
 
         # flush: true lets the writer finish what is queued (bounded wait) before the socket closes.
@@ -58,6 +62,17 @@ module Conclave
           Protocol.write(@socket, hash)
         rescue JSON::GeneratorError, EncodingError => e
           Agents.report("dropped unserializable message: #{e.message}")
+          send_fallback(hash)
+        end
+
+        # Tells the client its request failed, when the id alone can be serialized.
+        def send_fallback(hash)
+          id = hash[:id]
+          return unless id.is_a?(Integer) || (id.is_a?(String) && id.valid_encoding?)
+
+          Protocol.write(@socket, { id: id, ok: false, error: "internal error" })
+        rescue JSON::GeneratorError, EncodingError
+          nil
         end
 
         def close_socket
@@ -129,8 +144,16 @@ module Conclave
             sleep ACCEPT_RETRY_DELAY
             next
           end
-          Thread.new(socket) { |client| serve(client) }
+          spawn_serve(socket)
         end
+      end
+
+      def spawn_serve(socket)
+        Thread.new(socket) { |client| serve(client) }
+      rescue StandardError => e
+        Agents.report("could not start client thread: #{e.class}: #{e.message}")
+        socket.close unless socket.closed?
+        sleep ACCEPT_RETRY_DELAY
       end
 
       def serve(socket)
@@ -143,9 +166,22 @@ module Conclave
       rescue IOError, SystemCallError, JSON::GeneratorError
         nil
       ensure
-        @handler.disconnected(connection) if connection
+        finish(connection) if connection
+      end
+
+      # Flush and close first, then unregister; a raise in one must not skip the other.
+      def finish(connection)
+        begin
+          connection.close(flush: true)
+        rescue StandardError => e
+          Agents.report("closing connection failed: #{e.class}: #{e.message}")
+        end
+        begin
+          @handler.disconnected(connection)
+        rescue StandardError => e
+          Agents.report("disconnect handling failed: #{e.class}: #{e.message}")
+        end
         @connections_lock.synchronize { @connections.delete(connection) }
-        connection&.close(flush: true)
       end
 
       # nil at EOF, :bad for an unparseable line, :too_long (answered, then dropped) for an oversized one.

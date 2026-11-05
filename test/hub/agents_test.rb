@@ -12,10 +12,16 @@ class AgentsTest < Minitest::Test
 
     def initialize
       @deliveries = []
+      @closed = false
     end
 
-    def deliver(message)
+    def closed? = @closed
+
+    def close! = @closed = true
+
+    def deliver(message) # rubocop:disable Naming/PredicateMethod
       @deliveries << message
+      true
     end
   end
 
@@ -275,5 +281,40 @@ class AgentsTest < Minitest::Test
     _, err = capture_io { agents.post(agent: A, channel_id: CH, text: "@#{B} two", thread_ts: "50.0") }
     assert_match(/pause note failed.*boom/, err)
     assert_equal 1, @conn_b.deliveries.size
+  end
+
+  def test_closed_connection_falls_back_to_offline_queue
+    @agents.register(A, @conn_a)
+    @conn_a.close!
+    @agents.deliver(A, delivery)
+    refute @agents.online?(A)
+    assert_empty @conn_a.deliveries
+    assert_equal 1, @store.drain(A).size
+    assert_requested(:post, /reactions\.add/)
+  end
+
+  def test_failed_delivery_falls_back_to_offline_queue
+    conn = FakeConnection.new
+    conn.define_singleton_method(:deliver) { |_message| false }
+    @agents.register(A, conn)
+    @agents.deliver(A, delivery)
+    refute @agents.online?(A)
+    assert_equal 1, @store.drain(A).size
+    assert_requested(:post, /reactions\.add/)
+  end
+
+  def test_unregister_with_stale_connection_keeps_newer_registration
+    @agents.register(A, @conn_a)
+    @agents.unregister(A, @conn_b)
+    assert @agents.online?(A)
+    @agents.unregister(A, @conn_a)
+    refute @agents.online?(A)
+  end
+
+  def test_pause_note_is_recorded_with_owner_authority
+    agents = build_agents(limit: 1)
+    agents.register(B, @conn_b)
+    2.times { agents.post(agent: A, channel_id: CH, text: "@#{B} ping", thread_ts: "50.0") }
+    assert_equal "UTAD", @store.post_authority(CH, "100.1")
   end
 end

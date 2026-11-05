@@ -126,6 +126,7 @@ class ServerTest < Minitest::Test
     rpc(slow, { id: 1, op: "register", agent: A })
     other = connect
     rpc(other, { id: 1, op: "register", agent: "tad_sc-2" })
+    stub_slack(:post, "reactions.add")
     big = "x" * 20_000
     Timeout.timeout(5) do
       @lock.synchronize do
@@ -145,6 +146,48 @@ class ServerTest < Minitest::Test
     sock.close
     wait_until { !@agents.online?(A) }
     assert_equal true, rpc(connect, { id: 1, op: "register", agent: A })["ok"]
+  end
+
+  def test_overflowed_connection_falls_back_to_offline_queue
+    @server.start
+    sock = connect
+    rpc(sock, { id: 1, op: "register", agent: A })
+    stub_slack(:post, "reactions.add")
+    big = "x" * 20_000
+    @lock.synchronize do
+      2500.times { |i| @agents.deliver(A, { channel_id: CH, ts: "1.#{i}", authority: "UTAD", text: big }) }
+    end
+    refute @agents.online?(A)
+    assert_operator @store.drain(A).size, :>, 0
+    assert_requested(:post, /reactions\.add/, at_least_times: 1)
+  end
+
+  def test_socket_write_error_closes_connection_and_unregisters_agent
+    socket = Object.new
+    def socket.write(*) = raise(Errno::EPIPE)
+    def socket.closed? = false
+    def socket.shutdown(*) = nil
+    def socket.close = nil
+    connection = Conclave::Hub::Server::Connection.new(socket)
+    @agents.register(A, connection)
+    @handler.instance_variable_get(:@registered)[connection] = A
+    connection.write({ id: 1, ok: true })
+    wait_until { connection.closed? }
+    @handler.disconnected(connection)
+    refute @agents.online?(A)
+    assert_equal false, connection.write({ id: 2 })
+  end
+
+  def test_unserializable_response_gets_fallback_error
+    handler = Object.new
+    handler.define_singleton_method(:call) { |_req, _conn| { id: 7, ok: true, bad: "\xFF".b.force_encoding("UTF-8") } }
+    handler.define_singleton_method(:disconnected) { |_conn| nil }
+    server = Conclave::Hub::Server.new(path: File.join(@dir, "f.sock"), handler: handler).start
+    sock = UNIXSocket.new(File.join(@dir, "f.sock")).tap { |s| @sockets << s }
+    response = rpc(sock, { id: 7, op: "list_agents" })
+    assert_equal({ "id" => 7, "ok" => false, "error" => "internal error" }, response)
+  ensure
+    server&.stop
   end
 
   def test_accept_error_does_not_end_accept_loop
