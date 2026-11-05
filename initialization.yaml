@@ -1,0 +1,22 @@
+# Worktree setup for this project.
+#
+# Each entry is one step, run once when a new worktree is created, with the
+# worktree as the working directory. Steps run in this file's order and
+# setup halts on the first failure; progress and failures show on the
+# workstream's Info tab. `shell:` is optional and defaults to $SHELL.
+#
+# Steps run with Atelier's environment: every ATELIER_* variable and every
+# port declared in ports.yaml.
+#
+#   deps:
+#     command: bundle install
+#
+#   assets:
+#     shell: fish
+#     command: bun install && bun run build
+#
+# Uncomment and replace with this project's real setup steps. A file with
+# no steps means no setup runs.
+
+deps:
+  command: bundle install

@@ -1,0 +1,21 @@
+# Verification checks for this project.
+#
+# Each entry is one check: its name, the command to run, and optionally the
+# shell to run it in (`$SHELL` by default). Commands run with the
+# workstream's worktree as the working directory, each in its own terminal
+# in the Verification tab.
+#
+#   rubocop:
+#     shell: fish
+#     command: bundle exec rubocop
+#
+#   rspec:
+#     command: bundle exec rspec
+#
+# Replace the example below with this project's real checks.
+
+rake:
+  command: bundle exec rake test
+
+rubocop:
+  command: bundle exec rubocop
