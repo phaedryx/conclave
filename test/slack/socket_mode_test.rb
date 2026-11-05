@@ -106,7 +106,7 @@ class SocketModeTest < Minitest::Test
                                ])
     second = FakeConnection.new([JSON.generate(events_api({ "type" => "message", "text" => "b" }, envelope_id: "E2"))])
     connections = [first, second]
-    mode = build(connect: lambda { |_url, &blk|
+    mode = build(sleeper: ->(_secs) {}, connect: lambda { |_url, &blk|
       next mode.stop if connections.empty?
 
       blk.call(connections.shift)
@@ -141,19 +141,69 @@ class SocketModeTest < Minitest::Test
     assert_equal [1, 2, 4, 8, 16, 30, 30], sleeps
   end
 
-  def test_backoff_base_is_injectable_and_resets_after_success
+  def hello_only = FakeConnection.new([JSON.generate({ "type" => "hello" })])
+
+  def test_backoff_base_is_injectable_hello_only_flaps_grow_it_and_real_work_resets_it
     sleeps = []
     attempts = 0
     mode = build(backoff_base: 0.01, sleeper: ->(secs) { sleeps << secs },
                  connect: lambda { |_url, &blk|
                    attempts += 1
-                   raise "down" if [1, 2, 4].include?(attempts)
+                   raise "down" if attempts == 1
                    next mode.stop if attempts == 5
 
-                   blk.call(FakeConnection.new([JSON.generate({ "type" => "hello" })]))
+                   worked = FakeConnection.new([JSON.generate(events_api({ "type" => "message" }))])
+                   blk.call(attempts == 4 ? worked : hello_only)
                  })
     mode.run
-    assert_equal [0.01, 0.02, 0.01], sleeps.first(3)
+    assert_equal [0.01, 0.02, 0.04, 0.01], sleeps
+  end
+
+  def test_connection_up_for_healthy_after_seconds_resets_backoff
+    now = 0.0
+    sleeps = []
+    attempts = 0
+    mode = build(healthy_after: 10, clock: -> { now }, sleeper: ->(secs) { sleeps << secs },
+                 connect: lambda { |_url, &blk|
+                   attempts += 1
+                   next mode.stop if attempts == 4
+
+                   stays_up = attempts == 3
+                   blk.call(FakeConnection.new([-> { now += stays_up ? 11 : 1 and nil }]))
+                 })
+    mode.run
+    assert_equal [1, 2, 1], sleeps
+  end
+
+  def test_prompt_disconnect_reasons_reconnect_without_sleeping_or_growing_backoff
+    sleeps = []
+    reasons = %w[refresh_requested warning too_many_websockets]
+    attempts = 0
+    mode = build(sleeper: ->(secs) { sleeps << secs },
+                 connect: lambda { |_url, &blk|
+                   attempts += 1
+                   next mode.stop if attempts > 4
+
+                   reason = attempts == 4 ? nil : reasons[attempts - 1]
+                   blk.call(FakeConnection.new([JSON.generate({ "type" => "disconnect", "reason" => reason })]))
+                 })
+    mode.run
+    assert_equal [1, 2], sleeps # only the unrecognised reasons (and a missing one) back off
+  end
+
+  def test_authentication_failure_stops_the_loop_and_reports_it
+    fatal = []
+    slack = Object.new
+    calls = 0
+    slack.define_singleton_method(:open_socket_connection) do
+      calls += 1
+      raise Conclave::Slack::Client::AuthenticationError, "bad app token"
+    end
+    mode = build(slack: slack, on_fatal: ->(error) { fatal << error }, sleeper: ->(_secs) { flunk "slept" })
+    mode.run
+    assert_equal 1, calls
+    assert_equal ["bad app token"], fatal.map(&:message)
+    assert_match(/bad app token/, @errors.join)
   end
 
   def test_open_socket_connection_failure_backs_off

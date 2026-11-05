@@ -24,7 +24,6 @@ class HubTest < Minitest::Test
   end
 
   def setup
-    WebMock.reset!
     @dir = Dir.mktmpdir("cvhub")
     @config = Conclave::Config.new({ "bot_token" => "xoxb-1", "app_token" => "xapp-1", "owner_user_id" => "UTAD",
                                      "shortcut_token" => "sc-token" }, home: @dir)
@@ -32,8 +31,11 @@ class HubTest < Minitest::Test
   end
 
   def teardown
-    @hub&.synchronize { @hub.store.close }
+    @thread&.kill
+    @thread&.join(2)
+    @hub&.shutdown
     FileUtils.remove_entry(@dir)
+    super # WebMock's request reset lives in Minitest::Test#teardown; skipping it leaks request counts
   end
 
   def hub
@@ -124,15 +126,25 @@ class HubTest < Minitest::Test
 
   def test_run_serves_the_socket_and_stops_cleanly_on_term
     stub_slack(:post, "apps.connections.open", status: 500)
-    thread = nil
     capture_io do
-      thread = Thread.new { hub.run }
+      @thread = Thread.new { hub.run }
       Timeout.timeout(5) { sleep 0.05 until File.socket?(@config.socket_path) }
       Process.kill("TERM", Process.pid)
-      assert thread.join(5), "hub.run did not return after TERM"
+      assert @thread.join(5), "hub.run did not return after TERM"
     end
     refute File.exist?(@config.socket_path)
     assert_raises(ArgumentError) { hub.store.last_seen("C1") } # store closed
+  end
+
+  def test_run_exits_with_a_clear_error_when_slack_rejects_the_app_token
+    stub_slack(:post, "apps.connections.open", status: 401)
+    error = nil
+    capture_io do
+      thread = Thread.new { hub.run }
+      error = assert_raises(Conclave::Hub::AppTokenRejected) { Timeout.timeout(5) { thread.value } }
+    end
+    assert_match(/\ASlack app token rejected: .*authentication/i, error.message)
+    refute File.exist?(@config.socket_path)
   end
 
   def test_forget_remote_reports_when_hub_is_down

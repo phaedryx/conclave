@@ -17,6 +17,7 @@ class HubConnectionTest < Minitest::Test
   def teardown
     @cleanup.reverse_each(&:call)
     FileUtils.remove_entry(@dir)
+    super # WebMock's request reset lives in Minitest::Test#teardown
   end
 
   def build_hub_server

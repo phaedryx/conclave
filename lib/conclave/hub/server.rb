@@ -6,7 +6,7 @@ require "socket"
 module Conclave
   class Hub
     # Unix-socket NDJSON server. One reader thread per client; the handler serializes work under the hub lock.
-    class Server
+    class Server # rubocop:disable Metrics/ClassLength
       # What the handler sees as an agent's connection. Responses and deliveries only enqueue on a bounded
       # outbox; a writer thread per connection does the socket I/O, so a slow client never blocks the hub.
       # A failed write or an overflowing outbox closes the socket, which ends the reader and so goes through
@@ -91,11 +91,13 @@ module Conclave
 
       BAD_REQUEST = { ok: false, error: "bad request" }.freeze
       ACCEPT_RETRY_DELAY = 0.1
+      READER_JOIN_TIMEOUT = 2
 
       def initialize(path:, handler:)
         @path = path
         @handler = handler
         @connections = []
+        @readers = []
         @connections_lock = Mutex.new
         @stopping = false
       end
@@ -108,11 +110,14 @@ module Conclave
         self
       end
 
-      def stop
+      # Closes the listener and every connection, then waits up to `timeout` seconds in total for the reader
+      # threads (each runs Handler#disconnected on its way out) so nothing touches the hub after this returns.
+      def stop(timeout: READER_JOIN_TIMEOUT)
         @stopping = true
         @server&.close
-        @accept_thread&.join(1)
+        @accept_thread&.join(1) || @accept_thread&.kill
         @connections_lock.synchronize { @connections.dup }.each(&:close)
+        join_readers(timeout)
         File.delete(@path) if File.socket?(@path)
       end
 
@@ -148,8 +153,19 @@ module Conclave
         end
       end
 
+      def join_readers(timeout)
+        deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + timeout
+        @connections_lock.synchronize { @readers.dup }.each do |thread|
+          thread.join([deadline - Process.clock_gettime(Process::CLOCK_MONOTONIC), 0].max)
+        end
+      end
+
       def spawn_serve(socket)
-        Thread.new(socket) { |client| serve(client) }
+        reader = Thread.new(socket) { |client| serve(client) }
+        @connections_lock.synchronize do
+          @readers.select!(&:alive?)
+          @readers << reader
+        end
       rescue StandardError => e
         Agents.report("could not start client thread: #{e.class}: #{e.message}")
         socket.close unless socket.closed?
@@ -167,6 +183,7 @@ module Conclave
         nil
       ensure
         finish(connection) if connection
+        forget_reader
       end
 
       # Flush and close first, then unregister; a raise in one must not skip the other.
@@ -183,6 +200,8 @@ module Conclave
         end
         @connections_lock.synchronize { @connections.delete(connection) }
       end
+
+      def forget_reader = @connections_lock.synchronize { @readers.delete(Thread.current) }
 
       # nil at EOF, :bad for an unparseable line, :too_long (answered, then dropped) for an oversized one.
       def read_request(socket)

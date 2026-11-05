@@ -6,12 +6,14 @@ require "socket"
 module Conclave
   # The hub process: wires the store, Slack and Shortcut clients, routing, the agent socket server and
   # Socket Mode together. One Mutex serializes every Slack callback, socket request and the startup backfill.
-  class Hub
+  class Hub # rubocop:disable Metrics/ClassLength
     ConfigError = Class.new(StandardError)
     AlreadyRunning = Class.new(StandardError)
+    AppTokenRejected = Class.new(StandardError)
 
     REQUIRED = %w[bot_token app_token owner_user_id shortcut_token].freeze
     BACKFILL_LIMIT = 200
+    SHUTDOWN_JOIN_TIMEOUT = 2
 
     attr_reader :store, :agents, :router
 
@@ -33,6 +35,7 @@ module Conclave
       @config = config
       validate!(config)
       @lock = Mutex.new
+      @stopper = Thread::Queue.new
       @slack = Slack::Client.new(token: config.bot_token)
       auth = @slack.auth_test
       @bot_user = auth["user"]
@@ -51,28 +54,42 @@ module Conclave
       nil
     end
 
-    # Replays messages missed while the hub was down through the same rules as live ones.
+    # Replays messages missed while the hub was down through the same rules as live ones. Takes the hub lock
+    # itself, so it can never run unserialized.
     def backfill
-      @store.channels_with_last_seen.each do |channel, last_seen|
-        backfill_channel(channel, last_seen)
-      rescue StandardError => e
-        warn "conclave: backfill #{channel} failed: #{e.class}: #{e.message}"
+      synchronize do
+        @store.channels_with_last_seen.each do |channel, last_seen|
+          backfill_channel(channel, last_seen)
+        rescue StandardError => e
+          warn "conclave: backfill #{channel} failed: #{e.class}: #{e.message}"
+        end
       end
     end
 
+    # Blocks until INT/TERM or until Slack rejects the app token (then raises AppTokenRejected after shutdown).
     def run
       ensure_not_running! # before any teardown can run: stopping Server would unlink a live hub's socket
-      stopper = Thread::Queue.new
-      previous = %w[INT TERM].to_h { |signal| [signal, trap(signal) { stopper << signal }] }
-      begin
+      previous = %w[INT TERM].to_h { |signal| [signal, trap(signal) { @stopper << signal }] }
+      reason = begin
         @server.start
-        synchronize { backfill }
+        backfill
         @socket_mode.start
-        stopper.pop
+        @stopper.pop
       ensure
         previous.each { |signal, handler| trap(signal, handler) }
         shutdown
       end
+      raise AppTokenRejected, "Slack app token rejected: #{reason.message}" if reason.is_a?(Exception)
+    end
+
+    # Idempotent. Stops Socket Mode and the agent server (joining its reader threads) before closing the store.
+    def shutdown
+      return if @shut_down
+
+      @shut_down = true
+      @socket_mode&.stop
+      @server&.stop(timeout: SHUTDOWN_JOIN_TIMEOUT)
+      synchronize { @store&.close }
     end
 
     private
@@ -99,7 +116,8 @@ module Conclave
         slack: Slack::Client.new(token: config.app_token),
         on_event: ->(event) { synchronize { @router.handle_message(event) } },
         on_slash: ->(payload) { synchronize { commands.handle_slash(payload) } },
-        on_connected: method(:announce_connected)
+        on_connected: method(:announce_connected),
+        on_fatal: ->(error) { @stopper << error }
       )
     end
 
@@ -117,12 +135,6 @@ module Conclave
 
         @router.handle_message({ "channel" => channel }.merge(message))
       end
-    end
-
-    def shutdown
-      @socket_mode&.stop
-      @server&.stop
-      synchronize { @store&.close }
     end
   end
 end
