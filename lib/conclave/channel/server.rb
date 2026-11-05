@@ -36,6 +36,8 @@ module Conclave
             return Server.error_response(response["error"] || "hub error") unless response["ok"]
 
             Server.text_response(JSON.generate(response.except("id", "ok")))
+          rescue NameTaken => e
+            Server.error_response(e.message)
           rescue HubUnavailable
             Server.error_response("Conclave hub not running")
           end
@@ -156,7 +158,7 @@ module Conclave
 
       # CONCLAVE_AGENT is a worktree name; the agent registers under its short name. Nil when unset or empty.
       def self.agent_name(env = ENV)
-        worktree = env["CONCLAVE_AGENT"].to_s.strip
+        worktree = env["CONCLAVE_AGENT"].to_s.strip.downcase
         AgentName.from_worktree(worktree) unless worktree.empty?
       end
 

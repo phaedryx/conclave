@@ -7,6 +7,11 @@ module Conclave
     HubUnavailable = Class.new(StandardError)
     RequestTimeout = Class.new(HubUnavailable)
 
+    # The hub refused registration because another session holds the name.
+    class NameTaken < HubUnavailable
+      def initialize(agent) = super("name #{agent} is already online")
+    end
+
     # In-flight requests: one queue per id, answered by the reader or failed wholesale on disconnect.
     class PendingRequests
       def initialize
@@ -129,9 +134,10 @@ module Conclave
 
       def registered? = @state.registered?
 
-      # Raises HubUnavailable while disconnected or when the connection drops, RequestTimeout after the timeout.
+      # Raises HubUnavailable while disconnected or when the connection drops, RequestTimeout after the timeout, and
+      # NameTaken while the hub refuses the name because another session holds it.
       def request(operation, **fields)
-        raise HubUnavailable, "not connected" unless registered?
+        raise(@refusal == "name_taken" ? NameTaken.new(@agent) : HubUnavailable.new("not connected")) unless registered?
 
         roundtrip(operation, fields)
       end
@@ -157,6 +163,7 @@ module Conclave
 
       # One connect/register/read cycle. True when registration succeeded.
       def session
+        @refusal = nil
         socket = UNIXSocket.new(@path)
         @state.adopt(socket)
         reader = Thread.new { read(socket) }
@@ -174,8 +181,10 @@ module Conclave
         disconnect(socket)
       end
 
+      # Remembers a refusal until the next attempt, so requests can tell a refused name from a down hub.
       def register(socket)
         response = roundtrip("register", { agent: @agent })
+        @refusal = response["error"] unless response["ok"]
         if response["ok"] && mark_registered(socket)
           log("registered as #{@agent}")
           true

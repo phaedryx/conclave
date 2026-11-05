@@ -142,6 +142,14 @@ class ChannelServerTest < Minitest::Test
     assert_equal "Conclave hub not running", result[:content].first[:text]
   end
 
+  def test_name_taken_reaches_the_agent
+    hub = FakeHub.new(error: Conclave::Channel::NameTaken.new("tad_sc-1"))
+    result = call_tool(hub, "list_channels", {})
+
+    assert result[:isError]
+    assert_equal "name tad_sc-1 is already online", result[:content].first[:text]
+  end
+
   def test_hub_refusal_becomes_error_with_hub_text
     hub = FakeHub.new(response: { "id" => 1, "ok" => false, "error" => "not a member of #x" })
     result = call_tool(hub, "list_agents", { channel: "#x" })
@@ -162,6 +170,7 @@ class ChannelServerTest < Minitest::Test
   def test_agent_name_shortened
     assert_equal "tad_sc-1234", Server.agent_name({ "CONCLAVE_AGENT" => "tad_sc-1234-foo" })
     assert_equal "plain", Server.agent_name({ "CONCLAVE_AGENT" => "plain" })
+    assert_equal "tad_sc-1234", Server.agent_name({ "CONCLAVE_AGENT" => "Tad_SC-1234-Foo" })
     assert_nil Server.agent_name({})
   end
 

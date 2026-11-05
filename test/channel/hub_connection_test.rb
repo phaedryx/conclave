@@ -159,6 +159,49 @@ class HubConnectionTest < Minitest::Test
     assert_match(/name_taken/, err)
   end
 
+  def test_name_taken_is_reported_by_requests
+    fake_hub do |sock|
+      register = Conclave::Protocol.read(sock)
+      Conclave::Protocol.write(sock, { id: register["id"], ok: false, error: "name_taken" })
+    end
+    conn = nil
+    error = nil
+    capture_io do
+      conn = connect
+      wait_until do
+        conn.request(:list_channels)
+      rescue Conclave::Channel::HubUnavailable => e
+        (error = e).message != "not connected"
+      end
+    end
+
+    assert_kind_of Conclave::Channel::HubUnavailable, error
+    assert_equal "name #{A} is already online", error.message
+  end
+
+  def test_hub_down_after_name_taken_reports_not_connected
+    server = fake_hub do |sock|
+      register = Conclave::Protocol.read(sock)
+      Conclave::Protocol.write(sock, { id: register["id"], ok: false, error: "name_taken" })
+    end
+    conn = nil
+    capture_io do
+      conn = connect
+      wait_until do
+        conn.request(:list_channels)
+      rescue Conclave::Channel::HubUnavailable => e
+        e.message.include?("already online")
+      end
+      server.close
+      File.delete(@path)
+      wait_until do
+        conn.request(:list_channels)
+      rescue Conclave::Channel::HubUnavailable => e
+        e.message == "not connected"
+      end
+    end
+  end
+
   def test_on_deliver_errors_do_not_kill_reader
     fake_hub do |sock|
       register = Conclave::Protocol.read(sock)
