@@ -48,7 +48,19 @@ when "spike"
     warn "conclave: transport failed: #{e.class}: #{e.message}"
     exit 1
   end
+when "channel"
+  agent = Conclave::Channel::Server.agent_name
+  unless agent
+    warn "CONCLAVE_AGENT is required"
+    exit 1
+  end
+  begin
+    Conclave::Channel::Server.run(agent: agent)
+  rescue StandardError => e
+    warn "conclave: channel failed: #{e.class}: #{e.message}"
+    exit 1
+  end
 else
-  warn "usage: conclave spike"
+  warn "usage: conclave spike|channel"
   exit 1
 end
