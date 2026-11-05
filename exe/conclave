@@ -60,7 +60,26 @@ when "channel"
     warn "conclave: channel failed: #{e.class}: #{e.message}"
     exit 1
   end
+when "hub"
+  begin
+    Conclave::Hub.new(config: Conclave::Config.load).run
+  rescue Conclave::Hub::AlreadyRunning, Conclave::Hub::ConfigError, Conclave::Config::Error,
+         Conclave::Slack::Client::Error => e
+    warn e.message
+    exit 1
+  rescue StandardError => e
+    warn "conclave: hub failed: #{e.class}: #{e.message}"
+    exit 1
+  end
+when "forget"
+  name = ARGV[1]
+  unless name
+    warn "usage: conclave forget <name>"
+    exit 1
+  end
+  # Best effort: reads CONCLAVE_HOME for the socket path without loading config.
+  warn Conclave::Hub.forget_remote(name, path: Conclave::Channel::Server.socket_path)
 else
-  warn "usage: conclave spike|channel"
+  warn "usage: conclave spike|channel|hub|forget <name>"
   exit 1
 end

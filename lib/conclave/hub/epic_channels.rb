@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 module Conclave
-  module Hub
+  class Hub
     # Finds or creates the public channel for a story's epic and joins the agent to it.
     class EpicChannels
       MAX_NAME = 80

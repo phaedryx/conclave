@@ -5,7 +5,7 @@ require "sqlite3"
 
 module Conclave
   # SQLite-backed persistence. Not thread-safe: the hub serializes calls through one Mutex.
-  class Store
+  class Store # rubocop:disable Metrics/ClassLength
     BUSY_TIMEOUT_MS = 5000
 
     SCHEMA = <<~SQL
@@ -125,6 +125,13 @@ module Conclave
     def last_seen(channel_id)
       @db.get_first_value("SELECT ts FROM last_seen WHERE channel_id = ?", [channel_id])
     end
+
+    # Every channel with a recorded last_seen, as [channel_id, ts] pairs.
+    def channels_with_last_seen
+      @db.execute("SELECT channel_id, ts FROM last_seen ORDER BY channel_id")
+    end
+
+    def close = @db.close
 
     def set_last_seen(channel_id, ts)
       @db.execute("INSERT OR REPLACE INTO last_seen (channel_id, ts) VALUES (?, ?)", [channel_id, ts])

@@ -86,6 +86,14 @@ class StoreTest < Minitest::Test
     assert_equal [{ "n" => 1 }], @store.drain("a")
   end
 
+  def test_channels_with_last_seen_lists_pairs
+    assert_empty @store.channels_with_last_seen
+    @store.set_last_seen("C2", "2.2")
+    @store.set_last_seen("C1", "1.1")
+    @store.set_last_seen("C1", "1.5")
+    assert_equal [%w[C1 1.5], %w[C2 2.2]], @store.channels_with_last_seen
+  end
+
   def test_last_seen_round_trip
     assert_nil @store.last_seen("C1")
     @store.set_last_seen("C1", "1.1")

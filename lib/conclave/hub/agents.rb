@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 module Conclave
-  module Hub
+  class Hub
     # Registry of online agent connections plus outbound posting. Authority is per session and kept in
     # memory only. Not thread-safe: the hub serializes calls.
     class Agents # rubocop:disable Metrics/ClassLength

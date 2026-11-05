@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 module Conclave
-  module Hub
+  class Hub
     # Owner-only management commands: in-channel "@agent authorize <@U…>" and the /conclave slash command.
     class Commands
       ONLY_OWNER = "Only Tad can do that."

@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 module Conclave
-  module Hub
+  class Hub
     # Authority values are a Slack user ID String, or :none. Authority never passes
     # between agents: it narrows when combined and is checked per agent.
     class Authority

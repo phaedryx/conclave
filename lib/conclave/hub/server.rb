@@ -4,7 +4,7 @@ require "fileutils"
 require "socket"
 
 module Conclave
-  module Hub
+  class Hub
     # Unix-socket NDJSON server. One reader thread per client; the handler serializes work under the hub lock.
     class Server
       # What the handler sees as an agent's connection. Responses and deliveries only enqueue on a bounded

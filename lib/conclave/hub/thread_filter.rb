@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 module Conclave
-  module Hub
+  class Hub
     # Decides which messages of a Slack thread an agent may read. Text from anyone who may not direct
     # the agent is replaced by a placeholder and never reaches it.
     class ThreadFilter

@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 module Conclave
-  module Hub
+  class Hub
     # Routes Slack message events to agents. A message reaches an agent only when it addresses that agent
     # and the sender is the owner or authorized for it. Everything else is dropped silently.
     class Router

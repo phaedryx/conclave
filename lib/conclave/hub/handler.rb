@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 module Conclave
-  module Hub
+  class Hub
     # Executes one socket request on behalf of a connection. Every call runs under the hub lock.
     # Ops always act as the agent the connection registered; only `forget` names an agent.
     class Handler

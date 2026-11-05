@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 module Conclave
-  module Hub
+  class Hub
     # Validates a parsed request before the handler echoes or serializes any of it.
     module RequestCheck
       ID_TYPES = [NilClass, String, Integer].freeze

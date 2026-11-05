@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 module Conclave
-  module Hub
+  class Hub
     # Channel name from Slack, cached per channel_id. Falls back to the id (uncached) if Slack errors.
     class ChannelNames
       def initialize(slack)
