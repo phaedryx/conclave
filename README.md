@@ -28,34 +28,35 @@ All four tokens/IDs are required; the hub refuses to start without them.
 ## Running the hub
 
 ```sh
-bundle exec exe/conclave hub
+/Volumes/repos/conclave/bin/conclave hub
 ```
+
+`bin/conclave` changes to the repo root and runs `exe/conclave` with this repo's Ruby (`mise exec -- bundle exec`, or plain `bundle exec` when mise isn't installed), so it works from any directory, including repos pinned to another Ruby.
 
 State (SQLite) and the socket (`hub.sock`) live in `~/.conclave/`. Stop it with Ctrl-C.
 
 ## Connecting a Claude session
 
-Add the channel server to the `.mcp.json` of the directory you launch from, with an absolute `--gemfile`:
+Add the channel server to the `.mcp.json` of the directory you launch from:
 
 ```json
 {
   "mcpServers": {
     "conclave": {
-      "command": "bundle",
-      "args": ["exec", "--gemfile=/Volumes/repos/conclave/Gemfile", "/Volumes/repos/conclave/exe/conclave", "channel"],
-      "env": { "CONCLAVE_AGENT": "tad_sc-1234" }
+      "command": "/Volumes/repos/conclave/bin/conclave",
+      "args": ["channel"]
     }
   }
 }
 ```
 
-Channels are a research preview, so launch with the development flag:
+There is no `env` block: the channel server reads `CONCLAVE_AGENT` from the environment of the shell that launches `claude`, so one `.mcp.json` serves every agent. Channels are a research preview, so launch with the development flag. A story agent:
 
 ```sh
-claude --dangerously-load-development-channels server:conclave
+CONCLAVE_AGENT=tad_sc-1234 claude --dangerously-load-development-channels server:conclave
 ```
 
-`CONCLAVE_AGENT` is required. Story agents are named like `tad_sc-1234`. A story agent joins its Shortcut epic's channel automatically (the hub creates `epic-<id>-<name>` and invites Tad if needed). If the hub is down, the session works normally and the Conclave tools report "Conclave hub not running".
+`CONCLAVE_AGENT` is required (names are lowercased). Story agents are named like `tad_sc-1234`. A story agent joins its Shortcut epic's channel automatically (the hub creates `epic-<id>-<name>` and invites Tad if needed). If the hub is down, the session works normally and the Conclave tools report "Conclave hub not running".
 
 ### Coordinator
 
@@ -74,9 +75,9 @@ It joins channels only by invitation.
   - `/conclave invite <agent>` and `/conclave remove <agent>`
   - `/conclave authorize <agent> @person` and `/conclave deauthorize <agent> @person`
 - **In-channel authorize**: a message that is exactly `@agent authorize @person` (or `deauthorize`) is handled by the hub and never reaches the agent.
-- Agents reply in the thread, and can message each other by name. The hub stops agent-to-agent exchanges in a thread after `loop_guard_limit` messages with no message from Tad or an authorized person.
+- Agents reply in the thread, and can message each other by name. The hub stops agent-to-agent exchanges in a thread after `loop_guard_limit` messages with no message from Tad or an authorized person. Top-level agent-to-agent posts count per channel against the same limit, and any post from Tad or an authorized person in the channel resets that count.
 - Messages to an offline agent are queued (up to `offline_queue_limit`) and marked with a :zzz: reaction.
-- For a private channel, add the Conclave app to it first.
+- For a private channel, add the Conclave app to it first; `/conclave invite` says so if the app isn't there.
 
 ## Security
 
@@ -90,7 +91,7 @@ Agents run with permissions bypassed, so the hub is the security boundary.
 ## Forgetting an agent
 
 ```sh
-bundle exec exe/conclave forget <name>
+/Volumes/repos/conclave/bin/conclave forget <name>
 ```
 
 Ends that agent's memberships and authorizations. It refuses if the agent is online, and prints a note if the hub isn't running.
@@ -99,7 +100,8 @@ Ends that agent's memberships and authorizations. It refuses if the agent is onl
 
 - **"hub already running at ..."**: another hub answers on `hub.sock`. Stop it first. A stale socket file left by a crash is fine.
 - **"Slack app token rejected"**: `app_token` is wrong, revoked, or lacks `connections:write`. Regenerate it and update the config.
-- **"Conclave hub not running"** (from a tool): start the hub with `bundle exec exe/conclave hub`; the channel server reconnects on its own.
+- **"Conclave hub not running"** (from a tool): start the hub with `bin/conclave hub`; the channel server reconnects on its own.
+- **"name ... is already online"** (from a tool): another session holds this agent name. Close it, or launch with a different `CONCLAVE_AGENT`.
 - **"config is missing: ..."** / **"Conclave config not found"**: check `~/.conclave/config.yml` against `config.example.yml`.
 
 ## Development

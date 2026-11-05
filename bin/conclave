@@ -1,0 +1,19 @@
+#!/bin/sh
+# Runs exe/conclave with this repo's Ruby and bundle from any directory, so .mcp.json and Atelier can call it by
+# absolute path. Uses mise (which honors .ruby-version) when installed, plain bundle exec otherwise.
+set -e
+
+script=$0
+while [ -L "$script" ]; do
+  target=$(readlink "$script")
+  case $target in
+    /*) script=$target ;;
+    *) script=$(dirname "$script")/$target ;;
+  esac
+done
+cd "$(dirname "$script")/.."
+
+if command -v mise >/dev/null 2>&1; then
+  exec mise exec -- bundle exec exe/conclave "$@"
+fi
+exec bundle exec exe/conclave "$@"
