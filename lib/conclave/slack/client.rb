@@ -7,7 +7,16 @@ require "uri"
 module Conclave
   module Slack
     class Client
-      Error = Class.new(StandardError)
+      class Error < StandardError
+        # The Slack error code (e.g. "channel_not_found"); nil for HTTP-level failures.
+        attr_reader :code
+
+        def initialize(message = nil, code: nil)
+          super(message)
+          @code = code
+        end
+      end
+
       AuthenticationError = Class.new(Error)
       NotFoundError       = Class.new(Error)
       RateLimitError      = Class.new(Error)
@@ -111,11 +120,11 @@ module Conclave
       def handle_slack_error(error_code)
         case error_code
         when "invalid_auth", "not_authed", "token_revoked"
-          raise AuthenticationError, "Slack authentication error: #{error_code}"
+          raise AuthenticationError.new("Slack authentication error: #{error_code}", code: error_code)
         when "channel_not_found", "user_not_found"
-          raise NotFoundError, "Slack resource not found: #{error_code}"
+          raise NotFoundError.new("Slack resource not found: #{error_code}", code: error_code)
         else
-          raise SlackError, "Slack API error: #{error_code}"
+          raise SlackError.new("Slack API error: #{error_code}", code: error_code)
         end
       end
     end

@@ -70,6 +70,18 @@ class SlackClientTest < Minitest::Test
     assert_raises(Conclave::Slack::Client::AuthenticationError) { @client.auth_test }
   end
 
+  def test_slack_error_carries_code
+    stub_slack(:post, "conversations.join", response_body: { "ok" => false, "error" => "method_not_supported_for_channel_type" })
+    error = assert_raises(Conclave::Slack::Client::SlackError) { @client.join(channel: "G1") }
+    assert_equal "method_not_supported_for_channel_type", error.code
+  end
+
+  def test_http_error_has_nil_code
+    stub_slack(:get, "conversations.info", query: { channel: "C1" }, status: 500)
+    error = assert_raises(Conclave::Slack::Client::Error) { @client.channel_info(channel: "C1") }
+    assert_nil error.code
+  end
+
   def test_rate_limit_retries_once
     stub_request(:post, "#{SLACK_BASE_URL}/auth.test")
       .to_return({ status: 429, headers: { "Retry-After" => "1" } },
