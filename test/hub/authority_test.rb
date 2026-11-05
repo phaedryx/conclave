@@ -80,4 +80,28 @@ class AuthorityTest < Minitest::Test
   def test_human_role_outsider_is_nil
     assert_nil @authority.human_role("UOUT", AGENT)
   end
+
+  def test_constructor_rejects_nil_owner
+    assert_raises(ArgumentError) { Conclave::Hub::Authority.new(owner: nil, store: @store) }
+  end
+
+  def test_constructor_rejects_empty_owner
+    assert_raises(ArgumentError) { Conclave::Hub::Authority.new(owner: "", store: @store) }
+  end
+
+  def test_constructor_rejects_non_string_owner
+    assert_raises(ArgumentError) { Conclave::Hub::Authority.new(owner: :tad, store: @store) }
+  end
+
+  def test_human_role_nil_user_is_nil
+    assert_nil @authority.human_role(nil, AGENT)
+  end
+
+  def test_human_role_none_symbol_is_nil
+    assert_nil @authority.human_role(:none, AGENT)
+  end
+
+  def test_permits_nil_with_valid_owner_is_false
+    refute @authority.permits?(nil, AGENT)
+  end
 end

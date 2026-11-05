@@ -8,6 +8,8 @@ module Conclave
       NONE = :none
 
       def initialize(owner:, store:)
+        raise ArgumentError, "owner must be a non-empty String" unless owner.is_a?(String) && !owner.empty?
+
         @owner = owner
         @store = store
       end
@@ -23,10 +25,13 @@ module Conclave
       end
 
       def permits?(authority, agent)
-        authority == @owner || (authority.is_a?(String) && @store.authorized?(agent, authority))
+        return false unless authority.is_a?(String)
+
+        authority == @owner || @store.authorized?(agent, authority)
       end
 
       def human_role(user_id, agent)
+        return nil unless user_id.is_a?(String)
         return :owner if user_id == @owner
 
         :authorized if @store.authorized?(agent, user_id)
