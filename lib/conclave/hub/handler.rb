@@ -69,7 +69,10 @@ module Conclave
         {}
       end
 
-      def op_forget(request, _connection, _agent)
+      # Only unregistered connections (the `conclave forget` CLI) may forget; a registered agent must not.
+      def op_forget(request, _connection, agent)
+        raise Refusal, "forbidden" if agent
+
         name = string!(request, "agent")
         raise Refusal, "agent online" if @agents.online?(name)
 

@@ -176,6 +176,71 @@ class HubConnectionTest < Minitest::Test
     end
   end
 
+  def test_request_pins_op_and_id_over_caller_fields
+    seen = Queue.new
+    fake_hub do |sock|
+      register = Conclave::Protocol.read(sock)
+      Conclave::Protocol.write(sock, { id: register["id"], ok: true })
+      request = Conclave::Protocol.read(sock)
+      seen << request
+      Conclave::Protocol.write(sock, { id: request["id"], ok: true })
+      sleep
+    end
+    conn = connect
+    wait_until { conn.registered? }
+    conn.request(:list_channels, op: "forget", id: 999, agent: "x")
+    sent = Timeout.timeout(3) { seen.pop }
+
+    assert_equal "list_channels", sent["op"]
+    refute_equal 999, sent["id"]
+    assert_equal "x", sent["agent"]
+  end
+
+  def test_non_object_line_does_not_stop_reconnects
+    connections = Queue.new
+    fake_hub do |sock|
+      register = Conclave::Protocol.read(sock)
+      connections << true
+      Conclave::Protocol.write(sock, { id: register["id"], ok: true })
+      sock.write("[1]\n")
+      Conclave::Protocol.write(sock, { op: "deliver", message: { text: "later" } })
+      sleep 0.1
+      sock.close
+    end
+    capture_io do
+      connect
+      assert_equal({ "text" => "later" }, Timeout.timeout(3) { @delivered.pop })
+      2.times { Timeout.timeout(3) { connections.pop } }
+    end
+  end
+
+  def test_unexpected_session_error_falls_through_to_reconnect
+    server = build_hub_server.start
+    @cleanup << server.method(:stop)
+    calls = 0
+    original = UNIXSocket.method(:new)
+    UNIXSocket.define_singleton_method(:new) do |*args|
+      calls += 1
+      raise ArgumentError, "too long unix socket path" if calls == 1
+
+      original.call(*args)
+    end
+    @cleanup << -> { UNIXSocket.singleton_class.remove_method(:new) }
+    capture_io do
+      conn = connect
+      wait_until { conn.registered? }
+    end
+
+    assert_operator calls, :>=, 2
+  end
+
+  def test_stale_socket_cannot_mark_registered
+    conn = Connection.new(path: @path, agent: A, on_deliver: ->(_) {})
+    conn.send(:mark_registered, Object.new)
+
+    refute_predicate conn, :registered?
+  end
+
   def test_hub_down_at_start_keeps_retrying
     conn = nil
     capture_io do

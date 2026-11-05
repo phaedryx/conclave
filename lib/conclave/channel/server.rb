@@ -28,8 +28,11 @@ module Conclave
             value ? @operation = value : @operation
           end
 
+          def schema_keys = input_schema.to_h.fetch(:properties, {}).keys.map(&:to_sym)
+
+          # Only keys the tool's schema declares reach the hub; MCP passes unknown arguments straight through.
           def call(server_context:, **args)
-            response = server_context[:hub].request(operation, **args)
+            response = server_context[:hub].request(operation, **args.slice(*schema_keys))
             return Server.error_response(response["error"] || "hub error") unless response["ok"]
 
             Server.text_response(JSON.generate(response.except("id", "ok")))
@@ -80,9 +83,40 @@ module Conclave
 
       TOOLS = [SendMessage, GetThread, ListChannels, ListAgents].freeze
 
-      def self.build(agent:, hub:)
-        MCP::Server.new(
-          name: "conclave", version: "0.1.0", capabilities: CAPABILITIES,
+      # Holds deliveries until the MCP handshake completes, so none reach stdout before the client is ready.
+      class DeliveryGate
+        def initialize(sink)
+          @sink = sink
+          @lock = Mutex.new
+          @open = false
+          @held = []
+        end
+
+        def call(message)
+          @lock.synchronize do
+            @open ? @sink.call(message) : @held << message
+          end
+        end
+
+        def open
+          @lock.synchronize do
+            @open = true
+            @held.shift(@held.size).each { |message| @sink.call(message) }
+          end
+        end
+      end
+
+      # MCP::Server that reports the client's notifications/initialized to a callback.
+      class ChannelServer < MCP::Server
+        def initialize(on_initialized: nil, **)
+          super(**)
+          @handlers[MCP::Methods::NOTIFICATIONS_INITIALIZED] = ->(_) { on_initialized&.call }
+        end
+      end
+
+      def self.build(agent:, hub:, on_initialized: nil)
+        ChannelServer.new(
+          name: "conclave", version: "0.1.0", capabilities: CAPABILITIES, on_initialized: on_initialized,
           instructions: format(INSTRUCTIONS, agent: agent), tools: TOOLS, server_context: { hub: hub }
         )
       end
@@ -93,7 +127,11 @@ module Conclave
 
       def self.notification_params(message)
         meta = message.except(*HIDDEN_META).select { |key, value| key.to_s.match?(META_KEY) && !value.nil? }
-        { content: content(message), meta: meta.to_h { |key, value| [key.to_s, value.to_s] } }
+        { content: content(message), meta: meta.to_h { |key, value| [key.to_s, meta_value(value)] } }
+      end
+
+      def self.meta_value(value)
+        value.is_a?(String) || value.is_a?(Numeric) ? value.to_s : JSON.generate(value)
       end
 
       def self.content(message)
@@ -125,10 +163,9 @@ module Conclave
       # Starts the hub connection in the background (a down hub is not fatal) and serves stdio until EOF.
       def self.run(agent:, path: socket_path)
         transport = nil
-        hub = HubConnection.new(path: path, agent: agent, on_deliver: lambda { |message|
-          deliverer(transport).call(message)
-        })
-        transport = SyncStdioTransport.new(build(agent: agent, hub: hub))
+        gate = DeliveryGate.new(->(message) { deliverer(transport).call(message) })
+        hub = HubConnection.new(path: path, agent: agent, on_deliver: gate)
+        transport = SyncStdioTransport.new(build(agent: agent, hub: hub, on_initialized: gate.method(:open)))
         hub.start
         transport.open
       ensure

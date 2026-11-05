@@ -249,6 +249,15 @@ class HandlerTest < Minitest::Test
     assert_equal({ id: "s1", ok: true }, @handler.call({ "id" => "s1", "op" => "register", "agent" => A }, @conn))
   end
 
+  def test_forget_is_forbidden_from_a_registered_connection
+    register
+    @store.add_membership(B, CH)
+    response = request("forget", @conn, agent: B)
+
+    assert_equal({ id: 1, ok: false, error: "forbidden" }, response)
+    refute_empty @store.memberships(B)
+  end
+
   def test_forget_works_without_registration
     @store.add_membership(B, CH)
     assert_equal true, request("forget", agent: B)[:ok]

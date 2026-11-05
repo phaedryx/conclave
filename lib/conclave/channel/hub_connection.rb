@@ -31,8 +31,6 @@ module Conclave
     # Reads one socket until EOF or error. Deliver pushes go to on_deliver whenever they arrive (even before the
     # register response); everything else is a response, matched to its request by id.
     class SocketReader
-      ERRORS = [IOError, SystemCallError, JSON::ParserError, EncodingError, Protocol::LineTooLong].freeze
-
       def initialize(socket, pending, on_deliver)
         @socket = socket
         @pending = pending
@@ -43,13 +41,15 @@ module Conclave
         while (message = Protocol.read(@socket))
           route(message)
         end
-      rescue *ERRORS => e
+      rescue StandardError => e
         warn("conclave: hub read failed: #{e.class}: #{e.message}")
       end
 
       private
 
       def route(message)
+        return unless message.is_a?(Hash)
+
         if message["op"] == "deliver"
           deliver(message["message"])
         else
@@ -61,6 +61,37 @@ module Conclave
         @on_deliver.call(payload)
       rescue StandardError => e
         warn("conclave: deliver failed: #{e.class}: #{e.message}")
+      end
+    end
+
+    # The current socket and whether it has registered. Only the connection that owns the current socket may change
+    # state; a stale reader must not clobber a newer one.
+    class SocketState
+      attr_reader :socket
+
+      def initialize(pending)
+        @pending = pending
+        @lock = Mutex.new
+        @socket = nil
+        @registered = false
+      end
+
+      def registered? = @registered
+
+      def adopt(socket) = @lock.synchronize { @socket = socket }
+
+      def mark_registered(socket)
+        @lock.synchronize { @registered = true if @socket.equal?(socket) }
+      end
+
+      def release(socket)
+        @lock.synchronize do
+          next unless @socket.equal?(socket)
+
+          @registered = false
+          @socket = nil
+          @pending.fail_all
+        end
       end
     end
 
@@ -83,8 +114,7 @@ module Conclave
         @request_timeout = request_timeout
         @pending = PendingRequests.new
         @write_lock = Mutex.new
-        @socket = nil
-        @registered = false
+        @state = SocketState.new(@pending)
       end
 
       def start
@@ -94,14 +124,14 @@ module Conclave
 
       def stop
         @thread&.kill&.join(1)
-        disconnect(@socket)
+        disconnect(@state.socket)
       end
 
-      def registered? = @registered
+      def registered? = @state.registered?
 
       # Raises HubUnavailable while disconnected or when the connection drops, RequestTimeout after the timeout.
       def request(operation, **fields)
-        raise HubUnavailable, "not connected" unless @registered
+        raise HubUnavailable, "not connected" unless registered?
 
         roundtrip(operation, fields)
       end
@@ -111,23 +141,28 @@ module Conclave
       def run
         delay = @base_delay
         loop do
-          delay = @base_delay if session
+          delay = @base_delay if safe_session
           sleep delay
           delay = [delay * 2, @max_delay].min
         end
       end
 
+      # A session that fails unexpectedly is logged and treated as a failed attempt, so the loop backs off and retries.
+      def safe_session
+        session
+      rescue StandardError => e
+        log("hub session failed: #{e.class}: #{e.message}")
+        false
+      end
+
       # One connect/register/read cycle. True when registration succeeded.
       def session
         socket = UNIXSocket.new(@path)
-        @socket = socket
+        @state.adopt(socket)
         reader = Thread.new { read(socket) }
-        registered = register
+        registered = register(socket)
         reader.join if registered
         registered
-      rescue SystemCallError, IOError => e
-        log("hub connection failed: #{e.class}: #{e.message}")
-        false
       ensure
         reader&.kill
         disconnect(socket)
@@ -139,10 +174,9 @@ module Conclave
         disconnect(socket)
       end
 
-      def register
+      def register(socket)
         response = roundtrip("register", { agent: @agent })
-        if response["ok"]
-          @registered = true
+        if response["ok"] && mark_registered(socket)
           log("registered as #{@agent}")
           true
         else
@@ -153,6 +187,8 @@ module Conclave
         log("register failed for #{@agent}: #{e.message}")
         false
       end
+
+      def mark_registered(socket) = @state.mark_registered(socket)
 
       def roundtrip(operation, fields)
         id, queue = @pending.add
@@ -167,19 +203,14 @@ module Conclave
       end
 
       def send_request(request_id, operation, fields)
-        socket = @socket or raise HubUnavailable, "not connected"
-        @write_lock.synchronize { Protocol.write(socket, { id: request_id, op: operation.to_s }.merge(fields)) }
+        socket = @state.socket or raise HubUnavailable, "not connected"
+        @write_lock.synchronize { Protocol.write(socket, fields.merge(id: request_id, op: operation.to_s)) }
       rescue IOError, SystemCallError => e
         raise HubUnavailable, "write failed: #{e.message}"
       end
 
-      # Only the connection that owns the current socket may clear state; a stale reader must not clobber a newer one.
       def disconnect(socket)
-        if @socket.equal?(socket)
-          @registered = false
-          @socket = nil
-          @pending.fail_all
-        end
+        @state.release(socket)
         close_quietly(socket)
       end
 
