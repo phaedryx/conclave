@@ -191,6 +191,62 @@ class AgentsTest < Minitest::Test
     assert_empty @conn_b.deliveries
   end
 
+  def test_restart_keeps_delivered_authority
+    @store.authorize(A, "UJANE")
+    @agents.deliver(A, delivery(authority: "UJANE", sender: "UJANE", sender_role: "authorized"))
+    restarted = build_agents(limit: 10)
+    restarted.register(B, @conn_b)
+    restarted.post(agent: A, channel_id: CH, text: "@#{B} delete it")
+    assert_empty @conn_b.deliveries
+    assert_requested @post_stub
+  end
+
+  def test_restart_without_history_defaults_to_owner
+    restarted = build_agents(limit: 10)
+    restarted.register(B, @conn_b)
+    restarted.post(agent: A, channel_id: CH, text: "@#{B} go")
+    assert_equal "UTAD", @conn_b.deliveries.first[:authority]
+  end
+
+  def test_later_owner_delivery_does_not_launder_earlier_authority
+    @store.authorize(A, "UJANE")
+    @agents.register(B, @conn_b)
+    @agents.deliver(A, delivery(ts: "1", authority: "UJANE", sender: "UJANE", sender_role: "authorized"))
+    @agents.deliver(A, delivery(ts: "2", authority: "UTAD"))
+    @agents.post(agent: A, channel_id: CH, text: "@#{B} delete it")
+    assert_empty @conn_b.deliveries
+  end
+
+  def test_window_resets_after_post
+    @store.authorize(A, "UJANE")
+    @agents.register(B, @conn_b)
+    @agents.deliver(A, delivery(ts: "1", authority: "UJANE", sender: "UJANE", sender_role: "authorized"))
+    @agents.deliver(A, delivery(ts: "2", authority: "UTAD"))
+    @agents.post(agent: A, channel_id: CH, text: "@#{B} delete it")
+    @agents.deliver(A, delivery(ts: "3", authority: "UTAD"))
+    @agents.post(agent: A, channel_id: CH, text: "@#{B} go")
+    assert_equal(["UTAD"], @conn_b.deliveries.map { |m| m[:authority] })
+  end
+
+  def test_post_without_new_deliveries_keeps_last_post_authority
+    @store.authorize(A, "UJANE")
+    @agents.register(B, @conn_b)
+    @agents.deliver(A, delivery(authority: "UJANE", sender: "UJANE", sender_role: "authorized"))
+    @agents.post(agent: A, channel_id: CH, text: "status")
+    @agents.post(agent: A, channel_id: CH, text: "@#{B} go")
+    assert_empty @conn_b.deliveries
+  end
+
+  def test_restart_mid_window_fails_closed
+    @store.authorize(A, "UJANE")
+    @agents.deliver(A, delivery(ts: "1", authority: "UJANE", sender: "UJANE", sender_role: "authorized"))
+    restarted = build_agents(limit: 10)
+    restarted.register(B, @conn_b)
+    restarted.deliver(A, delivery(ts: "2", authority: "UTAD"))
+    restarted.post(agent: A, channel_id: CH, text: "@#{B} delete it")
+    assert_empty @conn_b.deliveries
+  end
+
   def test_loop_guard_pauses_after_limit
     agents = build_agents(limit: 2)
     agents.register(B, @conn_b)
@@ -238,8 +294,10 @@ class AgentsTest < Minitest::Test
     assert_equal 2, @conn_b.deliveries.size
   end
 
+  # B is authorized for Jane, so the window alone (Jane) would reach B: only the evicted reply target blocks it.
   def test_delivered_authority_is_bounded
     @store.authorize(A, "UJANE")
+    @store.authorize(B, "UJANE")
     @agents.deliver(A, delivery(ts: "old", authority: "UJANE"))
     210.times { |i| @agents.deliver(A, delivery(ts: i.to_s, authority: "UTAD")) }
     @agents.register(B, @conn_b)
@@ -263,10 +321,12 @@ class AgentsTest < Minitest::Test
     assert_empty @conn_b.deliveries
   end
 
+  # Jane's message came before the last post, so the window is Tad's alone; in_reply_to brings Jane back in.
   def test_in_reply_to_lowers_authority
     @store.authorize(B, "UJANE")
     @agents.register(B, @conn_b)
     @agents.deliver(A, delivery(ts: "1", authority: "UJANE", sender: "UJANE"))
+    @agents.post(agent: A, channel_id: CH, text: "on it")
     @agents.deliver(A, delivery(ts: "2", authority: "UTAD"))
     @agents.post(agent: A, channel_id: CH, text: "@#{B} go", in_reply_to_ts: "1")
     assert_equal "UJANE", @conn_b.deliveries.first[:authority]

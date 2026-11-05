@@ -25,6 +25,7 @@ module Conclave
         channel_id TEXT PRIMARY KEY, ts TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS post_authority (
         channel_id TEXT NOT NULL, ts TEXT NOT NULL, authority TEXT NOT NULL, PRIMARY KEY (channel_id, ts));
+      CREATE TABLE IF NOT EXISTS agent_authority (agent TEXT PRIMARY KEY, authority TEXT NOT NULL);
     SQL
 
     def initialize(path)
@@ -60,7 +61,7 @@ module Conclave
 
     def forget(agent)
       @db.transaction do
-        %w[memberships epic_joined grants queue].each do |table|
+        %w[memberships epic_joined grants queue agent_authority].each do |table|
           @db.execute("DELETE FROM #{table} WHERE agent = ?", [agent])
         end
       end
@@ -110,16 +111,25 @@ module Conclave
 
     # Authority of an agent post: a Slack user ID String, or :none (stored as "none").
     def record_post_authority(channel_id, ts, authority)
-      value = authority.is_a?(String) ? authority : Hub::Authority::NONE.to_s
       @db.execute("INSERT OR REPLACE INTO post_authority (channel_id, ts, authority) VALUES (?, ?, ?)",
-                  [channel_id, ts, value])
+                  [channel_id, ts, dump_authority(authority)])
     end
 
     # String, :none, or nil when the post is unknown.
     def post_authority(channel_id, ts)
-      value = @db.get_first_value("SELECT authority FROM post_authority WHERE channel_id = ? AND ts = ?",
-                                  [channel_id, ts])
-      value == Hub::Authority::NONE.to_s ? Hub::Authority::NONE : value
+      load_authority(@db.get_first_value("SELECT authority FROM post_authority WHERE channel_id = ? AND ts = ?",
+                                         [channel_id, ts]))
+    end
+
+    # An agent's current authority window (see Hub::Agents::AuthorityLedger), same encoding as post authority.
+    def set_agent_authority(agent, authority)
+      @db.execute("INSERT OR REPLACE INTO agent_authority (agent, authority) VALUES (?, ?)",
+                  [agent, dump_authority(authority)])
+    end
+
+    # String, :none, or nil when the agent has no recorded authority.
+    def agent_authority(agent)
+      load_authority(@db.get_first_value("SELECT authority FROM agent_authority WHERE agent = ?", [agent]))
     end
 
     def last_seen(channel_id)
@@ -136,5 +146,11 @@ module Conclave
     def set_last_seen(channel_id, ts)
       @db.execute("INSERT OR REPLACE INTO last_seen (channel_id, ts) VALUES (?, ?)", [channel_id, ts])
     end
+
+    private
+
+    def dump_authority(authority) = authority.is_a?(String) ? authority : Hub::Authority::NONE.to_s
+
+    def load_authority(value) = value == Hub::Authority::NONE.to_s ? Hub::Authority::NONE : value
   end
 end

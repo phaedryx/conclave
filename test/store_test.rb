@@ -101,6 +101,16 @@ class StoreTest < Minitest::Test
     assert_equal "2.2", @store.last_seen("C1")
   end
 
+  def test_agent_authority_round_trip
+    assert_nil @store.agent_authority("a")
+    @store.set_agent_authority("a", "UJANE")
+    @store.set_agent_authority("b", :none)
+    assert_equal "UJANE", @store.agent_authority("a")
+    assert_equal :none, @store.agent_authority("b")
+    @store.set_agent_authority("a", "UTAD")
+    assert_equal "UTAD", @store.agent_authority("a")
+  end
+
   def test_forget_clears_everything
     @store.add_membership("a", "C1")
     @store.add_membership("b", "C1")
@@ -108,7 +118,9 @@ class StoreTest < Minitest::Test
     @store.authorize("a", "U1")
     @store.authorize("b", "U1")
     @store.enqueue("a", { "x" => 1 }, limit: 5)
+    @store.set_agent_authority("a", "U1")
     @store.forget("a")
+    assert_nil @store.agent_authority("a")
     assert_empty @store.memberships("a")
     refute @store.epic_joined?("a")
     refute @store.authorized?("a", "U1")

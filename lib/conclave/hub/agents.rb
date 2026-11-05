@@ -2,8 +2,8 @@
 
 module Conclave
   class Hub
-    # Registry of online agent connections plus outbound posting. Authority is per session and kept in
-    # memory only. Not thread-safe: the hub serializes calls.
+    # Registry of online agent connections plus outbound posting. Each agent's authority window is persisted in
+    # the store. Not thread-safe: the hub serializes calls.
     class Agents # rubocop:disable Metrics/ClassLength
       EMOJI = %i[robot_face ghost alien space_invader jack_o_lantern owl fox_face panda_face tiger
                  penguin frog octopus crab dolphin unicorn_face bee].map { |name| ":#{name}:" }.freeze
@@ -39,21 +39,36 @@ module Conclave
         end
       end
 
-      # Remembers, per agent, the authority of its latest delivery and of its last DELIVERED_LIMIT deliveries by ts.
+      # Per agent: the authority window, persisted, and the authority of the last DELIVERED_LIMIT deliveries by ts.
+      #
+      # The window is the narrowest authority delivered since the agent's last post; a post resets it to that post's
+      # authority. The first delivery after a post replaces the window, later ones narrow it. Whether a delivery has
+      # come since the last post is kept in memory only, so after a restart the first delivery narrows the stored
+      # window instead of replacing it: fail closed for one post. An agent with no stored window starts as the owner.
       class AuthorityLedger
-        def initialize(owner)
-          @owner = owner
-          @current = {}
+        def initialize(authority, store)
+          @authority = authority
+          @store = store
+          @closed = {}
           @by_ts = Hash.new { |hash, agent| hash[agent] = {} }
         end
 
-        def record(agent, ts, authority)
-          @current[agent] = @by_ts[agent][ts] = authority.is_a?(String) ? authority : Authority::NONE
+        def record(agent, ts, delivered)
+          delivered = Authority::NONE unless delivered.is_a?(String)
+          @by_ts[agent][ts] = delivered
           @by_ts[agent].shift while @by_ts[agent].size > DELIVERED_LIMIT
+          window = @closed[agent] ? delivered : @authority.combine(current(agent), delivered)
+          @closed[agent] = false
+          @store.set_agent_authority(agent, window)
         end
 
-        # With no delivery yet the session was started by the owner.
-        def current(agent) = @current.fetch(agent, @owner)
+        def current(agent) = @store.agent_authority(agent) || @authority.owner
+
+        # Closes the window: the agent's next delivery starts a new one.
+        def posted(agent, authority)
+          @closed[agent] = true
+          @store.set_agent_authority(agent, authority)
+        end
 
         # nil without a reply target. A target missing from the ledger (unknown, another agent's, evicted)
         # fails closed to NONE.
@@ -89,7 +104,7 @@ module Conclave
         @loop_guard_limit = loop_guard_limit
         @queue_limit = queue_limit
         @connections = {}
-        @ledger = AuthorityLedger.new(authority.owner)
+        @ledger = AuthorityLedger.new(authority, store)
         @guard = LoopGuard.new(loop_guard_limit)
         @channel_names = ChannelNames.new(slack)
       end
@@ -129,6 +144,7 @@ module Conclave
                                        username: agent, icon_emoji: EMOJI[agent.sum % EMOJI.size])
         ts = response["ts"]
         authority = @authority.combine(@ledger.current(agent), @ledger.replied(agent, in_reply_to_ts))
+        @ledger.posted(agent, authority)
         @store.record_post_authority(channel_id, ts, authority)
         route_to_peers(Post.new(agent, channel_id, text, thread_ts, ts, authority))
         { ts: ts }
