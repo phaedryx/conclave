@@ -22,11 +22,18 @@ class CommandsTest < Minitest::Test
     { "user_id" => user, "channel_id" => CH, "text" => text }
   end
 
+  def channel_info_stub(channel, is_private: false, is_member: false)
+    stub_slack(:get, "conversations.info", query: { channel: channel },
+                                           response_body: { "channel" => { "id" => channel, "is_private" => is_private,
+                                                                           "is_member" => is_member } })
+  end
+
   def reaction_stub(name)
     stub_slack(:post, "reactions.add", request_body: hash_including("name" => name, "channel" => CH))
   end
 
   def test_slash_invite_joins_and_adds_membership
+    channel_info_stub("C2")
     join = stub_slack(:post, "conversations.join", request_body: hash_including("channel" => "C2"))
     @commands.handle_slash({ "user_id" => "UTAD", "channel_id" => "C2", "text" => "invite tad_sc-9" })
     assert_requested join
@@ -34,6 +41,7 @@ class CommandsTest < Minitest::Test
   end
 
   def test_slash_invite_private_channel_message
+    channel_info_stub(CH)
     stub_slack(:post, "conversations.join",
                response_body: { "ok" => false, "error" => "method_not_supported_for_channel_type" })
     reply = @commands.handle_slash(slash("invite tad_sc-9"))
@@ -41,10 +49,42 @@ class CommandsTest < Minitest::Test
     assert_empty @store.memberships("tad_sc-9")
   end
 
+  def test_slash_invite_private_channel_with_bot_adds_membership_without_join
+    channel_info_stub(CH, is_private: true, is_member: true)
+    join = stub_slack(:post, "conversations.join")
+    reply = @commands.handle_slash(slash("invite tad_sc-9"))
+    assert_equal "tad_sc-9 invited to this channel.", reply
+    assert_equal [CH], @store.memberships("tad_sc-9")
+    assert_not_requested join
+  end
+
+  def test_slash_invite_private_channel_without_bot_asks_for_app
+    channel_info_stub(CH, is_private: true, is_member: false)
+    join = stub_slack(:post, "conversations.join")
+    reply = @commands.handle_slash(slash("invite tad_sc-9"))
+    assert_equal "Add the Conclave app to this private channel first.", reply
+    assert_empty @store.memberships("tad_sc-9")
+    assert_not_requested join
+  end
+
   def test_slash_invite_other_slack_error_reports_and_does_not_add
+    channel_info_stub(CH)
     stub_slack(:post, "conversations.join", response_body: { "ok" => false, "error" => "ratelimited" })
     assert_match(/Couldn't join/, @commands.handle_slash(slash("invite tad_sc-9")))
     assert_empty @store.memberships("tad_sc-9")
+  end
+
+  def test_slash_agent_names_are_lowercased
+    channel_info_stub(CH)
+    stub_slack(:post, "conversations.join")
+    assert_equal "tad_sc-9 invited to this channel.", @commands.handle_slash(slash("invite TAD_SC-9"))
+    assert_equal [CH], @store.memberships("tad_sc-9")
+    @commands.handle_slash(slash("remove Tad_Sc-9"))
+    assert_empty @store.memberships("tad_sc-9")
+    assert_equal "Authorized <@UJANE> for tad_sc-777.", @commands.handle_slash(slash("authorize TAD_sc-777 <@UJANE>"))
+    assert @store.authorized?("tad_sc-777", "UJANE")
+    @commands.handle_slash(slash("deauthorize Tad_SC-777 <@UJANE>"))
+    refute @store.authorized?("tad_sc-777", "UJANE")
   end
 
   def test_slash_remove

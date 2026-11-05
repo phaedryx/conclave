@@ -25,8 +25,8 @@ module Conclave
       @app_token = values["app_token"]
       @owner_user_id = values["owner_user_id"]
       @shortcut_token = values["shortcut_token"]
-      @loop_guard_limit = values.fetch("loop_guard_limit", 10)
-      @offline_queue_limit = values.fetch("offline_queue_limit", 50)
+      @loop_guard_limit = values["loop_guard_limit"] || 10
+      @offline_queue_limit = values["offline_queue_limit"] || 50
     end
 
     def socket_path

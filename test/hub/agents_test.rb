@@ -67,6 +67,34 @@ class AgentsTest < Minitest::Test
     refute @agents.online?(A)
   end
 
+  def test_register_replaces_closed_connection
+    @agents.register(A, @conn_a)
+    @conn_a.close!
+    fresh = FakeConnection.new
+    assert_equal :ok, @agents.register(A, fresh)
+    @agents.unregister(A, @conn_a)
+    assert @agents.online?(A)
+    @agents.deliver(A, delivery)
+    assert_equal 1, fresh.deliveries.size
+  end
+
+  def test_replay_requeues_rest_when_connection_closes_mid_replay
+    %w[one two three].each_with_index { |text, i| @store.enqueue(A, delivery(ts: i.to_s, text: text), limit: 50) }
+    conn = FakeConnection.new
+    conn.define_singleton_method(:deliver) do |message|
+      next false if closed?
+
+      deliveries << message
+      close!
+      true
+    end
+    assert_equal :ok, @agents.register(A, conn)
+    assert_equal(%w[one], conn.deliveries.map { |m| m[:text] })
+    refute @agents.online?(A)
+    assert_equal(%w[two three], @store.drain(A).map { |payload| payload["text"] })
+    assert_not_requested(:post, /reactions\.add/)
+  end
+
   def test_online_delivery_goes_to_connection
     @agents.register(A, @conn_a)
     @agents.deliver(A, delivery)
@@ -261,12 +289,54 @@ class AgentsTest < Minitest::Test
     assert_equal(1, posted_bodies.count { |b| b["username"] == "conclave" })
   end
 
-  def test_loop_guard_keys_top_level_posts_by_posted_ts
+  def stub_distinct_post_ts
+    responses = (1..20).map { |i| { status: 200, body: { "ok" => true, "ts" => "200.#{i}" }.to_json } }
+    stub_request(:post, "#{SLACK_BASE_URL}/chat.postMessage").to_return(*responses)
+  end
+
+  def test_loop_guard_counts_top_level_posts_per_channel
     agents = build_agents(limit: 1)
     agents.register(B, @conn_b)
     2.times { agents.post(agent: A, channel_id: CH, text: "@#{B} ping") }
     assert_equal 1, @conn_b.deliveries.size
-    assert_equal "100.1", posted_bodies.find { |b| b["username"] == "conclave" }["thread_ts"]
+    note = posted_bodies.find { |b| b["username"] == "conclave" }
+    refute note.key?("thread_ts")
+  end
+
+  def test_loop_guard_top_level_posts_cannot_dodge_with_fresh_ts
+    stub_distinct_post_ts
+    agents = build_agents(limit: 2)
+    agents.register(B, @conn_b)
+    4.times { agents.post(agent: A, channel_id: CH, text: "@#{B} ping") }
+    assert_equal 2, @conn_b.deliveries.size
+    notes = posted_bodies.select { |b| b["username"] == "conclave" }
+    assert_equal 1, notes.size
+    refute notes.first.key?("thread_ts")
+    assert_equal "Pausing top-level agent-to-agent messages in this channel after 2 exchanges. " \
+                 "@tad, post here to continue.", notes.first["text"]
+  end
+
+  def test_loop_guard_channel_count_leaves_threads_alone
+    stub_distinct_post_ts
+    agents = build_agents(limit: 1)
+    agents.register(B, @conn_b)
+    2.times { agents.post(agent: A, channel_id: CH, text: "@#{B} ping") }
+    agents.post(agent: A, channel_id: CH, text: "@#{B} in thread", thread_ts: "50.0")
+    assert_equal(["@#{B} ping", "@#{B} in thread"], @conn_b.deliveries.map { |m| m[:text] })
+  end
+
+  def test_owner_post_anywhere_in_channel_resets_channel_count
+    stub_distinct_post_ts
+    agents = build_agents(limit: 1)
+    agents.register(B, @conn_b)
+    2.times { agents.post(agent: A, channel_id: CH, text: "@#{B} ping") }
+    agents.human_posted(channel_id: CH, thread_key: "50.0", user_id: "UOUTSIDER")
+    agents.post(agent: A, channel_id: CH, text: "@#{B} ping")
+    assert_equal 1, @conn_b.deliveries.size
+
+    agents.human_posted(channel_id: CH, thread_key: "50.0", user_id: "UTAD")
+    agents.post(agent: A, channel_id: CH, text: "@#{B} ping")
+    assert_equal 2, @conn_b.deliveries.size
   end
 
   def test_human_post_resets_loop_guard

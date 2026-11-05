@@ -36,7 +36,7 @@ module Conclave
 
         text = payload["text"].to_s.strip
         if (match = SLASH_AGENT_COMMAND.match(text))
-          agent_command(match[:verb].downcase, match[:agent], payload["channel_id"])
+          agent_command(match[:verb].downcase, match[:agent].downcase, payload["channel_id"])
         elsif (match = SLASH_USER_COMMAND.match(text))
           user_command(match)
         else
@@ -55,8 +55,9 @@ module Conclave
       end
 
       def user_command(match)
-        apply_grant(match[:verb], match[:agent], match[:user])
-        "#{match[:verb].capitalize}d <@#{match[:user]}> for #{match[:agent]}."
+        agent = match[:agent].downcase
+        apply_grant(match[:verb], agent, match[:user])
+        "#{match[:verb].capitalize}d <@#{match[:user]}> for #{agent}."
       end
 
       def apply_grant(verb, agent, user)
@@ -70,8 +71,14 @@ module Conclave
         "#{agent} removed from this channel."
       end
 
+      # A private channel can't be joined: the bot is either in it already (Tad added the app) or Tad must add it.
       def invite(agent, channel_id)
-        @slack.join(channel: channel_id)
+        channel = @slack.channel_info(channel: channel_id)["channel"] || {}
+        if channel["is_private"]
+          return PRIVATE_CHANNEL unless channel["is_member"]
+        else
+          @slack.join(channel: channel_id)
+        end
         @store.add_membership(agent, channel_id)
         "#{agent} invited to this channel."
       rescue Slack::Client::Error => e

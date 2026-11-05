@@ -41,4 +41,10 @@ class ConfigTest < Minitest::Test
       assert_includes error.message, File.join(dir, "config.yml")
     end
   end
+
+  def test_nil_limits_use_defaults
+    config = Conclave::Config.new({ "loop_guard_limit" => nil, "offline_queue_limit" => nil }, home: "/tmp/x")
+    assert_equal 10, config.loop_guard_limit
+    assert_equal 50, config.offline_queue_limit
+  end
 end
