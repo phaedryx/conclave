@@ -93,8 +93,7 @@ module Conclave
       end
 
       def stop
-        @thread&.kill
-        @thread&.join(1)
+        @thread&.kill&.join(1)
         disconnect(@socket)
       end
 
