@@ -30,6 +30,10 @@ Metrics/CyclomaticComplexity:
   Exclude:
     - test/**/*
 
+Metrics/ClassLength:
+  Exclude:
+    - test/**/*
+
 Metrics/ParameterLists:
   Exclude:
     - test/**/*

@@ -7,6 +7,8 @@ module Conclave
     class Authority
       NONE = :none
 
+      attr_reader :owner
+
       def initialize(owner:, store:)
         raise ArgumentError, "owner must be a non-empty String" unless owner.is_a?(String) && !owner.empty?
 
