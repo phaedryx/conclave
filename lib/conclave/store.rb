@@ -23,6 +23,8 @@ module Conclave
       CREATE INDEX IF NOT EXISTS queue_agent_idx ON queue (agent, id);
       CREATE TABLE IF NOT EXISTS last_seen (
         channel_id TEXT PRIMARY KEY, ts TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS post_authority (
+        channel_id TEXT NOT NULL, ts TEXT NOT NULL, authority TEXT NOT NULL, PRIMARY KEY (channel_id, ts));
     SQL
 
     def initialize(path)
@@ -104,6 +106,20 @@ module Conclave
         @db.execute("DELETE FROM queue WHERE agent = ?", [agent])
         rows.map { |(json)| JSON.parse(json) }
       end
+    end
+
+    # Authority of an agent post: a Slack user ID String, or :none (stored as "none").
+    def record_post_authority(channel_id, ts, authority)
+      value = authority.is_a?(String) ? authority : Hub::Authority::NONE.to_s
+      @db.execute("INSERT OR REPLACE INTO post_authority (channel_id, ts, authority) VALUES (?, ?, ?)",
+                  [channel_id, ts, value])
+    end
+
+    # String, :none, or nil when the post is unknown.
+    def post_authority(channel_id, ts)
+      value = @db.get_first_value("SELECT authority FROM post_authority WHERE channel_id = ? AND ts = ?",
+                                  [channel_id, ts])
+      value == Hub::Authority::NONE.to_s ? Hub::Authority::NONE : value
     end
 
     def last_seen(channel_id)

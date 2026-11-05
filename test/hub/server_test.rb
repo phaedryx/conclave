@@ -17,8 +17,9 @@ class ServerTest < Minitest::Test
                                         loop_guard_limit: 10, queue_limit: 50)
     epics = Object.new
     def epics.ensure_joined(_agent) = nil
+    @lock = Mutex.new
     @handler = Conclave::Hub::Handler.new(agents: @agents, store: @store, slack: @slack, authority: @authority,
-                                          epic_channels: epics, bot_id: "BHUB", lock: Mutex.new)
+                                          epic_channels: epics, bot_id: "BHUB", lock: @lock)
     @store.add_membership(A, CH)
     @server = Conclave::Hub::Server.new(path: @path, handler: @handler)
     @sockets = []
@@ -116,6 +117,77 @@ class ServerTest < Minitest::Test
     assert @agents.online?(A)
     sock.close
     wait_until { !@agents.online?(A) }
+  end
+
+  def test_slow_client_does_not_block_other_clients
+    @store.add_membership("tad_sc-2", CH)
+    @server.start
+    slow = connect
+    rpc(slow, { id: 1, op: "register", agent: A })
+    other = connect
+    rpc(other, { id: 1, op: "register", agent: "tad_sc-2" })
+    big = "x" * 20_000
+    Timeout.timeout(5) do
+      @lock.synchronize do
+        2500.times { |i| @agents.deliver(A, { channel_id: CH, ts: "1.#{i}", authority: "UTAD", text: big }) }
+      end
+    end
+    started = Time.now
+    assert_equal true, rpc(other, { id: 2, op: "list_agents", channel: CH })["ok"]
+    assert_operator Time.now - started, :<, 2
+    wait_until { !@agents.online?(A) } # outbox overflow closed the slow connection via disconnected
+  end
+
+  def test_failed_write_disconnects_agent
+    @server.start
+    sock = connect
+    rpc(sock, { id: 1, op: "register", agent: A })
+    sock.close
+    wait_until { !@agents.online?(A) }
+    assert_equal true, rpc(connect, { id: 1, op: "register", agent: A })["ok"]
+  end
+
+  def test_accept_error_does_not_end_accept_loop
+    flaky = Class.new(Conclave::Hub::Server) do
+      private
+
+      def listen
+        super.tap do |server|
+          failed = false
+          server.define_singleton_method(:accept) do
+            unless failed
+              failed = true
+              raise Errno::EMFILE
+            end
+            super()
+          end
+        end
+      end
+    end.new(path: @path, handler: @handler)
+    capture_io do
+      flaky.start
+      assert_equal true, rpc(connect, { id: 1, op: "register", agent: A })["ok"]
+    end
+  ensure
+    flaky&.stop
+  end
+
+  def test_invalid_utf8_and_bad_id_get_bad_request
+    @server.start
+    sock = connect
+    sock.write("{\"id\":1,\"op\":\"register\",\"agent\":\"\xFF\"}\n".b)
+    assert_equal "bad request", Conclave::Protocol.read(sock)["error"]
+    assert_equal "bad request", rpc(sock, { id: 1.5, op: "register", agent: A })["error"]
+    assert_equal "bad request", rpc(sock, { id: { a: 1 }, op: "register", agent: A })["error"]
+    assert_equal true, rpc(sock, { id: 2, op: "register", agent: A })["ok"]
+  end
+
+  def test_oversized_line_gets_bad_request_and_closes
+    @server.start
+    sock = connect
+    sock.write("#{'a' * (Conclave::Protocol::MAX_LINE + 10)}\n")
+    assert_equal "bad request", Conclave::Protocol.read(sock)["error"]
+    assert_nil Conclave::Protocol.read(sock)
   end
 
   def test_stop_removes_socket_file

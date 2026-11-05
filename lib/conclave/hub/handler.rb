@@ -10,6 +10,7 @@ module Conclave
 
       OPS = %w[register send_message get_thread list_channels list_agents forget].freeze
       UNREGISTERED_OPS = %w[register forget].freeze
+      BAD_REQUEST = { ok: false, error: "bad request" }.freeze
 
       # rubocop:disable-next Metrics/ParameterLists
       def initialize(agents:, store:, slack:, authority:, epic_channels:, bot_id:, lock:)
@@ -19,12 +20,12 @@ module Conclave
         @epic_channels = epic_channels
         @lock = lock
         @channel_names = ChannelNames.new(slack)
-        @thread_filter = ThreadFilter.new(authority: authority, bot_id: bot_id)
+        @thread_filter = ThreadFilter.new(authority: authority, bot_id: bot_id, store: store)
         @registered = {}
       end
 
       def call(request, connection)
-        return { ok: false, error: "bad request" } unless request.is_a?(Hash)
+        return BAD_REQUEST unless RequestCheck.well_formed?(request)
 
         id = request["id"]
         body = @lock.synchronize { dispatch(request, connection) }
@@ -70,8 +71,9 @@ module Conclave
 
       def op_forget(request, _connection, _agent)
         name = string!(request, "agent")
+        raise Refusal, "agent online" if @agents.online?(name)
+
         @store.forget(name)
-        @agents.unregister(name)
         @registered.delete_if { |_connection, registered| registered == name }
         {}
       end
@@ -87,7 +89,7 @@ module Conclave
         channel_id = resolve_channel(agent, string!(request, "channel"))
         thread_ts = string!(request, "thread_ts")
         replies = @slack.replies(channel: channel_id, ts: thread_ts)
-        { messages: replies.fetch("messages", []).map { |message| @thread_filter.call(message, agent) } }
+        { messages: replies.fetch("messages", []).map { |message| @thread_filter.call(message, agent, channel_id) } }
       end
 
       def op_list_channels(_request, _connection, agent)
@@ -101,8 +103,8 @@ module Conclave
 
       def join_epic(name)
         @epic_channels.ensure_joined(name)
-      rescue Slack::Client::Error => e
-        Agents.report("epic join failed for #{name}: #{e.message}")
+      rescue StandardError => e
+        Agents.report("epic join failed for #{name}: #{e.class}: #{e.message}")
       end
 
       def resolve_channel(agent, channel)

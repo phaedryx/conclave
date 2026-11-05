@@ -4,7 +4,7 @@ module Conclave
   module Hub
     # Registry of online agent connections plus outbound posting. Authority is per session and kept in
     # memory only. Not thread-safe: the hub serializes calls.
-    class Agents
+    class Agents # rubocop:disable Metrics/ClassLength
       EMOJI = %i[robot_face ghost alien space_invader jack_o_lantern owl fox_face panda_face tiger
                  penguin frog octopus crab dolphin unicorn_face bee].map { |name| ":#{name}:" }.freeze
       DELIVERED_LIMIT = 200
@@ -100,6 +100,9 @@ module Conclave
         @connections[name] = connection
         @store.drain(name).each { |payload| deliver_online(name, connection, Payload.restore(payload)) }
         :ok
+      rescue StandardError
+        unregister(name) # all or nothing: a failed drain must not leave the name taken
+        raise
       end
 
       def unregister(name) = @connections.delete(name)
@@ -120,6 +123,7 @@ module Conclave
                                        username: agent, icon_emoji: EMOJI[agent.sum % EMOJI.size])
         ts = response["ts"]
         authority = @authority.combine(@ledger.current(agent), @ledger.replied(agent, in_reply_to_ts))
+        @store.record_post_authority(channel_id, ts, authority)
         route_to_peers(Post.new(agent, channel_id, text, thread_ts, ts, authority))
         { ts: ts }
       end

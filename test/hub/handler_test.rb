@@ -127,6 +127,7 @@ class HandlerTest < Minitest::Test
     register
     @store.authorize(A, "UFRIEND")
     @store.authorize(B, "UOTHER")
+    @store.record_post_authority(CH, "2", "UTAD")
     messages = [
       { "ts" => "1", "user" => "UTAD", "text" => "owner says" },
       { "ts" => "2", "bot_id" => "BHUB", "username" => B, "text" => "agent says" },
@@ -166,14 +167,83 @@ class HandlerTest < Minitest::Test
                  request("list_agents", channel: "#epic-1-x")[:agents]
   end
 
-  def test_forget_removes_agent_and_registration
+  def test_forget_removes_offline_agent
     register
+    @handler.disconnected(@conn)
     @store.authorize(A, "UFRIEND")
-    assert_equal({ id: 1, ok: true }, request("forget", agent: A))
-    refute @agents.online?(A)
+    assert_equal({ id: 1, ok: true }, request("forget", FakeConnection.new, agent: A))
     assert_empty @store.memberships(A)
     refute @store.authorized?(A, "UFRIEND")
-    assert_equal "not registered", request("list_channels")[:error]
+  end
+
+  def test_forget_refuses_online_agent
+    register
+    response = request("forget", FakeConnection.new, agent: A)
+    assert_equal({ id: 1, ok: false, error: "agent online" }, response)
+    assert @agents.online?(A)
+    assert_equal [CH], @store.memberships(A)
+  end
+
+  def test_forget_of_offline_agent_leaves_later_registration_alone_when_stale_connection_disconnects
+    stale = FakeConnection.new
+    register(A, stale)
+    @agents.unregister(A) # the agent went offline without the handler noticing (stale mapping remains)
+    assert_equal true, request("forget", FakeConnection.new, agent: A)[:ok]
+    z = FakeConnection.new
+    assert_equal true, register(A, z)[:ok]
+    @handler.disconnected(stale)
+    assert @agents.online?(A)
+    @agents.deliver(A, { channel_id: CH, ts: "1.1", authority: "UTAD", text: "hi" })
+    assert_equal 1, z.deliveries.size
+  end
+
+  def test_register_is_atomic_when_drain_delivery_raises
+    @store.enqueue(A, { channel_id: CH, ts: "1.1", authority: "UTAD", text: "queued" }, limit: 50)
+    boom = FakeConnection.new
+    def boom.deliver(_message) = raise("kaboom")
+    capture_io { assert_equal false, register(A, boom)[:ok] }
+    refute @agents.online?(A)
+    assert_equal "not registered", request("list_channels", boom)[:error]
+    assert_equal true, register(A, FakeConnection.new)[:ok]
+    assert @agents.online?(A)
+  end
+
+  def test_register_survives_non_slack_epic_error
+    epics = Object.new
+    def epics.ensure_joined(_agent) = raise("surprise")
+    handler = Conclave::Hub::Handler.new(agents: @agents, store: @store, slack: @slack, authority: @authority,
+                                         epic_channels: epics, bot_id: "BHUB", lock: Mutex.new)
+    response = nil
+    capture_io { response = handler.call({ "id" => 1, "op" => "register", "agent" => A }, @conn) }
+    assert_equal true, response[:ok]
+    assert @agents.online?(A)
+  end
+
+  def test_get_thread_agent_posts_follow_recorded_authority
+    register
+    @store.authorize(B, "UOTHER")
+    @store.record_post_authority(CH, "1", "UTAD")     # permitted for A
+    @store.record_post_authority(CH, "2", "UOTHER")   # authorized for B only
+    @store.record_post_authority(CH, "3", :none)
+    messages = [1, 2, 3, 4].map { |i| { "ts" => i.to_s, "bot_id" => "BHUB", "username" => B, "text" => "post #{i}" } }
+    stub_slack(:get, "conversations.replies", query: { channel: CH, ts: TS, limit: "50" },
+                                              response_body: { "messages" => messages })
+
+    result = request("get_thread", channel: CH, thread_ts: TS)[:messages]
+
+    assert_equal "post 1", result[0][:text]
+    assert_equal "agent", result[0][:sender_role]
+    assert_equal([false] * 3, (1..3).map { |i| result[i][:text].start_with?("post") })
+    assert_equal "[hidden message ts=4]", result[3][:text]
+  end
+
+  def test_invalid_utf8_and_bad_ids_are_bad_requests
+    assert_equal "bad request", request("register", agent: "\xFF".dup.force_encoding("UTF-8"))[:error]
+    assert_equal "bad request", @handler.call({ "id" => 1.5, "op" => "register", "agent" => A }, @conn)[:error]
+    assert_equal "bad request", @handler.call({ "id" => [1], "op" => "register", "agent" => A }, @conn)[:error]
+    assert_equal "bad request", @handler.call({ "id" => "x", "op" => "register", "agent" => A, "n" => ["\xFF"] }, @conn)[:error]
+    refute @agents.online?(A)
+    assert_equal({ id: "s1", ok: true }, @handler.call({ "id" => "s1", "op" => "register", "agent" => A }, @conn))
   end
 
   def test_forget_works_without_registration

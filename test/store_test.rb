@@ -30,6 +30,15 @@ class StoreTest < Minitest::Test
     assert_equal %w[C1], @store.memberships("a")
   end
 
+  def test_post_authority_round_trip
+    assert_nil @store.post_authority("C1", "1.1")
+    @store.record_post_authority("C1", "1.1", "UTAD")
+    @store.record_post_authority("C1", "1.2", :none)
+    assert_equal "UTAD", @store.post_authority("C1", "1.1")
+    assert_equal :none, @store.post_authority("C1", "1.2")
+    assert_nil @store.post_authority("C2", "1.1")
+  end
+
   def test_epic_joined
     refute @store.epic_joined?("a")
     @store.mark_epic_joined("a")

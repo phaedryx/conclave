@@ -15,6 +15,13 @@ class ProtocolTest < Minitest::Test
     assert_nil Conclave::Protocol.read(StringIO.new(""))
   end
 
+  def test_read_raises_on_line_over_cap
+    long = "#{'a' * Conclave::Protocol::MAX_LINE}\n"
+    assert_raises(Conclave::Protocol::LineTooLong) { Conclave::Protocol.read(StringIO.new(long)) }
+    ok = "{\"a\":\"#{'a' * (Conclave::Protocol::MAX_LINE - 20)}\"}\n"
+    assert_equal 1, Conclave::Protocol.read(StringIO.new(ok)).size
+  end
+
   def test_read_raises_on_malformed_json
     assert_raises(JSON::ParserError) { Conclave::Protocol.read(StringIO.new("{nope\n")) }
   end
