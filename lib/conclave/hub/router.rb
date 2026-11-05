@@ -10,6 +10,8 @@ module Conclave
       FetchError = Class.new(StandardError)
 
       def initialize(agents:, authority:, store:, slack:, bot_id:, commands:) # rubocop:disable Metrics/ParameterLists
+        raise ArgumentError, "bot_id is required" if bot_id.nil? || bot_id.to_s.empty?
+
         @agents = agents
         @authority = authority
         @store = store
@@ -36,7 +38,8 @@ module Conclave
       private
 
       def ignored?(event)
-        event["subtype"] || event["user"].nil? || (!@bot_id.nil? && event["bot_id"] == @bot_id)
+        (event["subtype"] && event["subtype"] != "thread_broadcast") || event["user"].nil? ||
+          event["bot_id"] == @bot_id
       end
 
       # [[agent, role], ...] for the addressed agents the sender may direct.
@@ -69,9 +72,15 @@ module Conclave
         Permalink.extract(text).zip(urls).filter_map do |link, url|
           fetch(link)
         rescue Slack::Client::Error, FetchError => e
-          reply_error(event, "Couldn't read linked message #{url}: #{e.message}")
+          warn_link_failure(event, url, e)
           nil
         end
+      end
+
+      def warn_link_failure(event, url, error)
+        code = error.respond_to?(:code) ? error.code : nil
+        Agents.report("link fetch failed for #{url}: #{error.message}")
+        reply_error(event, "Couldn't read linked message #{url}: #{code || 'unavailable'}")
       end
 
       def fetch(link)

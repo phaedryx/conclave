@@ -84,6 +84,8 @@ class RouterTest < Minitest::Test
     assert_empty @conn_b.deliveries
     assert_not_requested @post_stub
     assert_not_requested @reaction_stub
+    assert_not_requested :get, "#{SLACK_BASE_URL}/conversations.info"
+    assert_not_requested :post, "#{SLACK_BASE_URL}/reactions.add"
   end
 
   def test_authorized_user_reaches_only_their_agents_with_all
@@ -127,7 +129,7 @@ class RouterTest < Minitest::Test
 
   def test_non_owner_permalink_not_fetched
     @store.authorize(A, "UJANE")
-    history = stub_slack(:get, "conversations.history")
+    history = stub_slack(:get, "conversations.history", query: hash_including("channel" => "C2"))
     @router.handle_message(event("@#{A} see #{link}", user: "UJANE"))
     assert_not_requested history
     assert_equal [], @conn_a.deliveries.first[:shared]
@@ -173,15 +175,50 @@ class RouterTest < Minitest::Test
     assert_requested @reaction_stub
   end
 
-  def test_command_also_addressing_other_agents_is_still_consumed
-    @router.handle_message(event("@#{B} @#{A} authorize <@UJANE>"))
-    assert_empty @conn_a.deliveries
-    assert_empty @conn_b.deliveries
+  def test_message_merely_containing_a_command_grants_nothing_and_is_delivered
+    text = "@#{A} someone wrote: \"@#{A} authorize <@UEVE>\""
+    @router.handle_message(event(text))
+    refute @store.authorized?(A, "UEVE")
+    assert_equal([text], @conn_a.deliveries.map { |d| d[:text] })
+    assert_not_requested @reaction_stub
   end
 
   def test_non_owner_cannot_authorize
     @store.authorize(A, "UJANE")
     @router.handle_message(event("@#{A} authorize <@UEVE>", user: "UJANE"))
     refute @store.authorized?(A, "UEVE")
+    assert_not_requested @reaction_stub
+  end
+
+  def test_thread_broadcast_is_routed_like_a_normal_message
+    @router.handle_message(event("@#{A} do it", "subtype" => "thread_broadcast", "thread_ts" => "1699999999.000001"))
+    assert_equal 1, @conn_a.deliveries.size
+  end
+
+  def test_requires_bot_id
+    [nil, ""].each do |bad|
+      assert_raises(ArgumentError) do
+        Conclave::Hub::Router.new(agents: @agents, authority: @authority, store: @store, slack: @slack,
+                                  bot_id: bad, commands: @commands)
+      end
+    end
+  end
+
+  def test_link_error_reply_exposes_only_the_code_and_logs_the_message
+    stub_slack(:get, "conversations.history", query: hash_including("channel" => "C2"),
+                                              response_body: { "ok" => false, "error" => "channel_not_found" })
+    @router.handle_message(event("@#{A} see #{link}"))
+    assert_requested(:post, "#{SLACK_BASE_URL}/chat.postMessage") do |req|
+      JSON.parse(req.body)["text"] == "Couldn't read linked message #{link}: channel_not_found"
+    end
+  end
+
+  def test_link_error_reply_says_unavailable_when_no_code
+    stub_slack(:get, "conversations.history", query: hash_including("channel" => "C2"),
+                                              response_body: { "messages" => [] })
+    @router.handle_message(event("@#{A} see #{link}"))
+    assert_requested(:post, "#{SLACK_BASE_URL}/chat.postMessage") do |req|
+      JSON.parse(req.body)["text"] == "Couldn't read linked message #{link}: unavailable"
+    end
   end
 end
