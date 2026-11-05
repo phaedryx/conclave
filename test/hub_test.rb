@@ -49,6 +49,14 @@ class HubTest < Minitest::Test
     assert File.exist?(@config.db_path)
   end
 
+  def test_hub_slack_client_does_not_sleep_on_rate_limit
+    stub = stub_request(:post, "#{SLACK_BASE_URL}/auth.test").to_return(status: 429, body: "")
+    started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+    assert_raises(Conclave::Slack::Client::RateLimitError) { hub }
+    assert_operator Process.clock_gettime(Process::CLOCK_MONOTONIC) - started, :<, 0.5
+    assert_requested stub, times: 1
+  end
+
   def test_blank_credentials_fail_fast_with_clear_message
     %w[bot_token app_token owner_user_id shortcut_token].each do |key|
       values = { "bot_token" => "a", "app_token" => "b", "owner_user_id" => "c", "shortcut_token" => "d", key => " " }

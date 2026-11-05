@@ -40,13 +40,37 @@ class SlackClientTest < Minitest::Test
   end
 
   def test_replies_and_history_use_get
-    stub_slack(:get, "conversations.replies", query: { "channel" => "C1", "ts" => "1.0", "limit" => "50" },
+    stub_slack(:get, "conversations.replies", query: { "channel" => "C1", "ts" => "1.0", "limit" => "200" },
                                               response_body: { "messages" => [] })
     stub_slack(:get, "conversations.history",
                query: { "channel" => "C1", "latest" => "9", "oldest" => "1", "inclusive" => "true", "limit" => "20" },
                response_body: { "messages" => [] })
     assert_equal [], @client.replies(channel: "C1", ts: "1.0")["messages"]
     assert_equal [], @client.history(channel: "C1", latest: "9", oldest: "1", inclusive: true)["messages"]
+  end
+
+  def stub_rate_limited(path)
+    stub_request(:post, "#{SLACK_BASE_URL}/#{path}")
+      .to_return({ status: 429, headers: { "Retry-After" => "3" }, body: "" },
+                 { status: 200, body: { "ok" => true, "user_id" => "UBOT" }.to_json })
+  end
+
+  def test_rate_limit_sleeps_and_retries_by_default
+    stub = stub_rate_limited("auth.test")
+    slept = []
+    @client.define_singleton_method(:sleep) { |seconds| slept << seconds }
+    assert_equal "UBOT", @client.auth_test["user_id"]
+    assert_equal [3], slept
+    assert_requested stub, times: 2
+  end
+
+  def test_rate_limit_raises_at_once_without_sleep
+    client = Conclave::Slack::Client.new(token: "xoxb-test", sleep_on_rate_limit: false)
+    stub = stub_rate_limited("auth.test")
+    client.define_singleton_method(:sleep) { |_seconds| flunk "slept on a rate limit" }
+    error = assert_raises(Conclave::Slack::Client::RateLimitError) { client.auth_test }
+    assert_equal "ratelimited", error.code
+    assert_requested stub, times: 1
   end
 
   def test_channel_management

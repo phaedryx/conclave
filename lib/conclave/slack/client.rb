@@ -22,8 +22,10 @@ module Conclave
       RateLimitError      = Class.new(Error)
       SlackError          = Class.new(Error)
 
-      def initialize(token:, base_url: "https://slack.com/api")
+      # sleep_on_rate_limit: false makes a 429 raise RateLimitError at once, for callers holding a lock.
+      def initialize(token:, base_url: "https://slack.com/api", sleep_on_rate_limit: true)
         @base_url = base_url
+        @sleep_on_rate_limit = sleep_on_rate_limit
         @http = HTTPX.with(
           resolver_class: :system,
           headers: {
@@ -42,7 +44,7 @@ module Conclave
         post("chat.postMessage", body.compact)
       end
 
-      def replies(channel:, ts:, limit: 50)
+      def replies(channel:, ts:, limit: 200)
         get("conversations.replies", channel: channel, ts: ts, limit: limit)
       end
 
@@ -92,17 +94,25 @@ module Conclave
         url
       end
 
-      def request
+      def request(&)
         response = yield
         raise Error, "HTTP connection error: #{response.error}" if response.is_a?(HTTPX::ErrorResponse)
 
-        if response.status == 429
-          sleep (response.headers["retry-after"]&.to_i || 1).clamp(1, 30)
-          response = yield
-          raise RateLimitError, "Slack rate limit exceeded (retry also failed)" if response.status == 429
-        end
+        response = retry_rate_limited(response, &) if response.status == 429
         handle_response(response)
       end
+
+      def retry_rate_limited(response)
+        raise rate_limited("Slack rate limit exceeded") unless @sleep_on_rate_limit
+
+        sleep (response.headers["retry-after"]&.to_i || 1).clamp(1, 30)
+        response = yield
+        raise rate_limited("Slack rate limit exceeded (retry also failed)") if response.status == 429
+
+        response
+      end
+
+      def rate_limited(message) = RateLimitError.new(message, code: "ratelimited")
 
       def handle_response(response)
         case response.status

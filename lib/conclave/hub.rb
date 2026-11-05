@@ -36,7 +36,7 @@ module Conclave
       validate!(config)
       @lock = Mutex.new
       @stopper = Thread::Queue.new
-      @slack = Slack::Client.new(token: config.bot_token)
+      @slack = Slack::Client.new(token: config.bot_token, sleep_on_rate_limit: false)
       auth = @slack.auth_test
       @bot_user = auth["user"]
       FileUtils.mkdir_p(config.home, mode: 0o700)
@@ -113,7 +113,7 @@ module Conclave
                             epic_channels: epics, bot_id: bot_id, lock: @lock)
       @server = Server.new(path: config.socket_path, handler: handler)
       @socket_mode = Slack::SocketMode.new(
-        slack: Slack::Client.new(token: config.app_token),
+        slack: Slack::Client.new(token: config.app_token, sleep_on_rate_limit: false),
         on_event: ->(event) { synchronize { @router.handle_message(event) } },
         on_slash: ->(payload) { synchronize { commands.handle_slash(payload) } },
         on_connected: method(:announce_connected),

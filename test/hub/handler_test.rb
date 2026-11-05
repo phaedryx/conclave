@@ -140,7 +140,7 @@ class HandlerTest < Minitest::Test
       { "ts" => "6", "bot_id" => "BOTHER", "username" => "x", "text" => "foreign bot" },
       { "ts" => "7", "text" => "no user" }
     ]
-    stub_slack(:get, "conversations.replies", query: { channel: CH, ts: TS, limit: "50" },
+    stub_slack(:get, "conversations.replies", query: { channel: CH, ts: TS, limit: "200" },
                                               response_body: { "messages" => messages })
 
     result = request("get_thread", channel: CH, thread_ts: TS)[:messages]
@@ -229,7 +229,7 @@ class HandlerTest < Minitest::Test
     @store.record_post_authority(CH, "2", "UOTHER")   # authorized for B only
     @store.record_post_authority(CH, "3", :none)
     messages = [1, 2, 3, 4].map { |i| { "ts" => i.to_s, "bot_id" => "BHUB", "username" => B, "text" => "post #{i}" } }
-    stub_slack(:get, "conversations.replies", query: { channel: CH, ts: TS, limit: "50" },
+    stub_slack(:get, "conversations.replies", query: { channel: CH, ts: TS, limit: "200" },
                                               response_body: { "messages" => messages })
 
     result = request("get_thread", channel: CH, thread_ts: TS)[:messages]
