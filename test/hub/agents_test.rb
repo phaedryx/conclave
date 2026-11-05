@@ -256,6 +256,43 @@ class AgentsTest < Minitest::Test
     assert_equal(["UTAD"], @conn_b.deliveries.map { |m| m[:authority] })
   end
 
+  def peer_delivery(ts)
+    delivery(ts: ts, sender: "coord", sender_role: "agent", authority: "UTAD")
+  end
+
+  def test_peer_post_with_owner_authority_does_not_widen_after_post
+    @store.authorize(A, "UJANE")
+    @agents.register(B, @conn_b)
+    @agents.deliver(A, delivery(ts: "1", authority: "UJANE", sender: "UJANE", sender_role: "authorized"))
+    @agents.post(agent: A, channel_id: CH, text: "on it")
+    @agents.deliver(A, peer_delivery("2"))
+    @agents.post(agent: A, channel_id: CH, text: "@#{B} delete it")
+    assert_empty @conn_b.deliveries
+  end
+
+  def test_owner_message_widens_after_peer_post_with_owner_authority
+    @store.authorize(A, "UJANE")
+    @agents.register(B, @conn_b)
+    @agents.deliver(A, delivery(ts: "1", authority: "UJANE", sender: "UJANE", sender_role: "authorized"))
+    @agents.post(agent: A, channel_id: CH, text: "on it")
+    @agents.deliver(A, peer_delivery("2"))
+    @agents.deliver(A, delivery(ts: "3", authority: "UTAD"))
+    @agents.post(agent: A, channel_id: CH, text: "@#{B} go")
+    assert_equal(["UTAD"], @conn_b.deliveries.map { |m| m[:authority] })
+  end
+
+  def test_authorized_person_does_not_widen_after_post
+    @store.authorize(A, "UJANE")
+    @store.authorize(A, "UBOB")
+    @store.authorize(B, "UBOB")
+    @agents.register(B, @conn_b)
+    @agents.deliver(A, delivery(ts: "1", authority: "UJANE", sender: "UJANE", sender_role: "authorized"))
+    @agents.post(agent: A, channel_id: CH, text: "on it")
+    @agents.deliver(A, delivery(ts: "2", authority: "UBOB", sender: "UBOB", sender_role: "authorized"))
+    @agents.post(agent: A, channel_id: CH, text: "@#{B} go")
+    assert_empty @conn_b.deliveries
+  end
+
   def test_post_without_new_deliveries_keeps_last_post_authority
     @store.authorize(A, "UJANE")
     @agents.register(B, @conn_b)

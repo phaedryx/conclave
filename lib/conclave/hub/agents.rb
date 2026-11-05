@@ -42,10 +42,13 @@ module Conclave
 
       # Per agent: the authority window, persisted, and the authority of the last DELIVERED_LIMIT deliveries by ts.
       #
-      # The window is the narrowest authority delivered since the agent's last post; a post resets it to that post's
-      # authority. The first delivery after a post replaces the window, later ones narrow it. Whether a delivery has
-      # come since the last post is kept in memory only, so after a restart the first delivery narrows the stored
-      # window instead of replacing it: fail closed for one post. An agent with no stored window starts as the owner.
+      # The window is the narrowest authority delivered since the agent's last post; a post sets it to that post's
+      # authority. Only a message the owner typed can widen it, and only while the window is closed: no delivery
+      # narrower than the owner has arrived since the last post. Everything else, peer posts included, narrows. So
+      # an agent can't launder a narrower authority into the owner's by posting and then hearing from an agent that
+      # carries the owner's authority. Whether the window is closed is kept in memory only, so after a restart the
+      # owner's first message narrows instead: fail closed for one post. An agent with no stored window starts as
+      # the owner.
       class AuthorityLedger
         def initialize(authority, store)
           @authority = authority
@@ -54,12 +57,12 @@ module Conclave
           @by_ts = Hash.new { |hash, agent| hash[agent] = {} }
         end
 
-        def record(agent, ts, delivered)
+        def record(agent, ts, delivered, typed_by_owner:)
           delivered = Authority::NONE unless delivered.is_a?(String)
-          @by_ts[agent][ts] = delivered
-          @by_ts[agent].shift while @by_ts[agent].size > DELIVERED_LIMIT
-          window = @closed[agent] ? delivered : @authority.combine(current(agent), delivered)
-          @closed[agent] = false
+          remember(agent, ts, delivered)
+          owner = delivered == @authority.owner
+          window = @closed[agent] && typed_by_owner && owner ? delivered : @authority.combine(current(agent), delivered)
+          @closed[agent] = false unless owner
           @store.set_agent_authority(agent, window)
         end
 
@@ -74,6 +77,13 @@ module Conclave
         # nil without a reply target. A target missing from the ledger (unknown, another agent's, evicted)
         # fails closed to NONE.
         def replied(agent, ts) = (@by_ts[agent].fetch(ts, Authority::NONE) if ts)
+
+        private
+
+        def remember(agent, ts, delivered)
+          @by_ts[agent][ts] = delivered
+          @by_ts[agent].shift while @by_ts[agent].size > DELIVERED_LIMIT
+        end
       end
 
       def self.report(text)
@@ -183,7 +193,9 @@ module Conclave
         connection.deliver(message)
       end
 
-      def record_authority(agent, message) = @ledger.record(agent, message[:ts], message[:authority])
+      def record_authority(agent, message)
+        @ledger.record(agent, message[:ts], message[:authority], typed_by_owner: message[:sender_role] == "owner")
+      end
 
       def route_to_peers(post)
         addressees(post.agent, post.channel_id, post.text).each do |peer|

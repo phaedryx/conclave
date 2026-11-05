@@ -180,6 +180,9 @@ A stdio MCP server that Claude Code launches inside each session. It gets its ag
   So Jane, authorized for `tad_sc-1234`, can't reach `tad_sc-5678` by asking `tad_sc-1234` to pass
   her request along. Exactly how authority follows a multi-message turn is the builder's call, but
   when in doubt it should fall back to the most restrictive authority, not Tad.
+- **Only a message Tad types can widen an agent's authority (Tad's decision).** Posts from other
+  agents, even ones carrying Tad's authority, can only narrow it. So a coordinator can't restore an
+  agent's authority on Tad's behalf.
 - `@tad_sc-1234 authorize @jane` and `@tad_sc-1234 deauthorize @jane` are commands that only Tad
   can issue. The hub handles them itself and never passes them to the agent. A grant applies to
   that one agent. `/conclave authorize tad_sc-1234 @jane` does the same thing.

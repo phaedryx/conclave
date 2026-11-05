@@ -1,14 +1,8 @@
 {
   "mcpServers": {
     "conclave": {
-      "command": "bundle",
-      "args": [
-        "exec",
-        "--gemfile",
-        "/Volumes/repos/conclave/Gemfile",
-        "/Volumes/repos/conclave/exe/conclave",
-        "spike"
-      ]
+      "command": "/Volumes/repos/conclave/bin/conclave",
+      "args": ["channel"]
     }
   }
 }
