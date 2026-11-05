@@ -238,6 +238,42 @@ class AgentsTest < Minitest::Test
     210.times { |i| @agents.deliver(A, delivery(ts: i.to_s, authority: "UTAD")) }
     @agents.register(B, @conn_b)
     @agents.post(agent: A, channel_id: CH, text: "@#{B} go", in_reply_to_ts: "old")
-    assert_equal "UTAD", @conn_b.deliveries.first[:authority]
+    assert_empty @conn_b.deliveries
+    assert_requested @post_stub
+  end
+
+  def test_unknown_in_reply_to_fails_closed
+    @agents.register(B, @conn_b)
+    @agents.post(agent: A, channel_id: CH, text: "@#{B} go", in_reply_to_ts: "nope")
+    assert_empty @conn_b.deliveries
+    assert_requested @post_stub
+  end
+
+  def test_nil_authority_fails_closed
+    @agents.register(B, @conn_b)
+    @agents.deliver(A, delivery(ts: "1", authority: "UTAD"))
+    @agents.deliver(A, delivery(ts: "2", authority: nil))
+    @agents.post(agent: A, channel_id: CH, text: "@#{B} go", in_reply_to_ts: "1")
+    assert_empty @conn_b.deliveries
+  end
+
+  def test_in_reply_to_lowers_authority
+    @store.authorize(B, "UJANE")
+    @agents.register(B, @conn_b)
+    @agents.deliver(A, delivery(ts: "1", authority: "UJANE", sender: "UJANE"))
+    @agents.deliver(A, delivery(ts: "2", authority: "UTAD"))
+    @agents.post(agent: A, channel_id: CH, text: "@#{B} go", in_reply_to_ts: "1")
+    assert_equal "UJANE", @conn_b.deliveries.first[:authority]
+  end
+
+  def test_pause_note_failure_does_not_raise
+    agents = build_agents(limit: 1)
+    agents.register(B, @conn_b)
+    stub_slack(:post, "chat.postMessage", request_body: hash_including("username" => "conclave"),
+                                          response_body: { "ok" => false, "error" => "boom" })
+    agents.post(agent: A, channel_id: CH, text: "@#{B} one", thread_ts: "50.0")
+    _, err = capture_io { agents.post(agent: A, channel_id: CH, text: "@#{B} two", thread_ts: "50.0") }
+    assert_match(/pause note failed.*boom/, err)
+    assert_equal 1, @conn_b.deliveries.size
   end
 end

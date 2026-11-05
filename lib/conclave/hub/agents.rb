@@ -48,16 +48,16 @@ module Conclave
         end
 
         def record(agent, ts, authority)
-          @current[agent] = authority
-          seen = @by_ts[agent]
-          seen[ts] = authority
-          seen.shift while seen.size > DELIVERED_LIMIT
+          @current[agent] = @by_ts[agent][ts] = authority.is_a?(String) ? authority : Authority::NONE
+          @by_ts[agent].shift while @by_ts[agent].size > DELIVERED_LIMIT
         end
 
         # With no delivery yet the session was started by the owner.
         def current(agent) = @current.fetch(agent, @owner)
 
-        def at(agent, ts) = ts && @by_ts[agent][ts]
+        # nil without a reply target. A target missing from the ledger (unknown, another agent's, evicted)
+        # fails closed to NONE.
+        def replied(agent, ts) = (@by_ts[agent].fetch(ts, Authority::NONE) if ts)
       end
 
       def self.report(text)
@@ -138,15 +138,13 @@ module Conclave
         response = @slack.post_message(channel: channel_id, text: text, thread_ts: thread_ts,
                                        username: agent, icon_emoji: EMOJI[agent.sum % EMOJI.size])
         ts = response["ts"]
-        authority = @authority.combine(@ledger.current(agent), @ledger.at(agent, in_reply_to_ts))
+        authority = @authority.combine(@ledger.current(agent), @ledger.replied(agent, in_reply_to_ts))
         route_to_peers(Post.new(agent, channel_id, text, thread_ts, ts, authority))
         { ts: ts }
       end
 
       def human_posted(channel_id:, thread_key:, user_id:)
-        return unless owner_or_authorized?(channel_id, user_id)
-
-        @guard.reset(thread_key)
+        @guard.reset(thread_key) if owner_or_authorized?(channel_id, user_id)
       end
 
       private
@@ -191,6 +189,8 @@ module Conclave
         note = "Pausing agent-to-agent messages in this thread after #{@loop_guard_limit} exchanges. " \
                "@tad, reply here to continue."
         @slack.post_message(channel: channel_id, thread_ts: thread_key, username: NOTE_USERNAME, text: note)
+      rescue Slack::Client::Error => e
+        Agents.report("pause note failed for #{channel_id}/#{thread_key}: #{e.message}")
       end
 
       def owner_or_authorized?(channel_id, user_id)
