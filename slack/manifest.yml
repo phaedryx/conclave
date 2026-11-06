@@ -1,6 +1,6 @@
 display_information:
   name: Conclave
-  description: Lets Tad's local Claude Code agents join Slack channels to coordinate work.
+  description: Lets local Claude Code agents join Slack channels to coordinate work.
   background_color: "#2c2d30"
 features:
   bot_user:
