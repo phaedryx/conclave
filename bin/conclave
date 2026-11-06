@@ -1,6 +1,8 @@
 #!/bin/sh
-# Runs exe/conclave with this repo's Ruby and bundle from any directory, so .mcp.json and Atelier can call it by
-# absolute path. Uses mise (which honors .ruby-version) when installed, plain bundle exec otherwise.
+# Runs exe/conclave with this repo's Ruby from any directory, so .mcp.json and Atelier can call it by absolute
+# path. Resolves the Ruby binary through mise (which honors .ruby-version) rather than `mise exec`: in a shell
+# where mise is already activated, `mise exec` leaves PATH as it found it, and a Homebrew Ruby listed earlier
+# wins. exe/conclave requires bundler/setup itself, so no `bundle exec` is needed.
 set -e
 
 script=$0
@@ -13,7 +15,12 @@ while [ -L "$script" ]; do
 done
 cd "$(dirname "$script")/.."
 
+BUNDLE_GEMFILE=$PWD/Gemfile
+export BUNDLE_GEMFILE
+
 if command -v mise >/dev/null 2>&1; then
-  exec mise exec -- bundle exec exe/conclave "$@"
+  ruby=$(mise which ruby)
+else
+  ruby=ruby
 fi
-exec bundle exec exe/conclave "$@"
+exec "$ruby" exe/conclave "$@"

@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "conclave": {
+      "command": "/Volumes/repos/conclave/bin/conclave",
+      "args": ["channel"]
+    }
+  }
+}
