@@ -142,7 +142,7 @@ class AgentsTest < Minitest::Test
 
   def test_post_delivers_to_addressed_peer
     @agents.register(B, @conn_b)
-    @agents.post(agent: A, channel_id: CH, text: "@#{B} take a look", thread_ts: "50.0")
+    @agents.post(agent: A, channel_id: CH, text: "#{B}: take a look", thread_ts: "50.0")
     delivered = @conn_b.deliveries.first
     assert_equal A, delivered[:sender]
     assert_equal "agent", delivered[:sender_role]
@@ -157,7 +157,7 @@ class AgentsTest < Minitest::Test
   def test_post_does_not_deliver_to_self_or_unaddressed
     @agents.register(A, @conn_a)
     @agents.register(B, @conn_b)
-    @agents.post(agent: A, channel_id: CH, text: "@#{A} @#{B}")
+    @agents.post(agent: A, channel_id: CH, text: "#{A}, #{B}: hi")
     assert_empty @conn_a.deliveries
     @agents.post(agent: A, channel_id: CH, text: "no mention")
     assert_equal 1, @conn_b.deliveries.size
@@ -166,7 +166,7 @@ class AgentsTest < Minitest::Test
   def test_post_all_addresses_other_members
     @agents.register(B, @conn_b)
     @agents.register(A, @conn_a)
-    @agents.post(agent: A, channel_id: CH, text: "@all heads up")
+    @agents.post(agent: A, channel_id: CH, text: "all: heads up")
     assert_equal 1, @conn_b.deliveries.size
     assert_empty @conn_a.deliveries
   end
@@ -175,7 +175,7 @@ class AgentsTest < Minitest::Test
     stub_slack(:get, "conversations.info", query: { channel: "C9" }, response_body: { "ok" => false, "error" => "boom" })
     @store.add_membership(B, "C9")
     @agents.register(B, @conn_b)
-    @agents.post(agent: A, channel_id: "C9", text: "@#{B} hi")
+    @agents.post(agent: A, channel_id: "C9", text: "#{B}: hi")
     assert_equal "C9", @conn_b.deliveries.first[:channel]
   end
 
@@ -183,7 +183,7 @@ class AgentsTest < Minitest::Test
     @store.authorize(A, "UJANE")
     @agents.register(B, @conn_b)
     @agents.deliver(A, delivery(authority: "UJANE", sender: "UJANE", sender_role: "authorized"))
-    @agents.post(agent: A, channel_id: CH, text: "@#{B} delete it")
+    @agents.post(agent: A, channel_id: CH, text: "#{B}: delete it")
     assert_empty @conn_b.deliveries
     assert_requested @post_stub
   end
@@ -193,20 +193,20 @@ class AgentsTest < Minitest::Test
     @store.authorize(B, "UJANE")
     @agents.register(B, @conn_b)
     @agents.deliver(A, delivery(authority: "UJANE"))
-    @agents.post(agent: A, channel_id: CH, text: "@#{B} go")
+    @agents.post(agent: A, channel_id: CH, text: "#{B}: go")
     assert_equal "UJANE", @conn_b.deliveries.first[:authority]
   end
 
   def test_no_prior_delivery_uses_owner_authority
     @agents.register(B, @conn_b)
-    @agents.post(agent: A, channel_id: CH, text: "@#{B} go")
+    @agents.post(agent: A, channel_id: CH, text: "#{B}: go")
     assert_equal "UTAD", @conn_b.deliveries.first[:authority]
   end
 
   def test_none_authority_reaches_nobody
     @agents.register(B, @conn_b)
     @agents.deliver(A, delivery(authority: :none))
-    @agents.post(agent: A, channel_id: CH, text: "@#{B} go")
+    @agents.post(agent: A, channel_id: CH, text: "#{B}: go")
     assert_empty @conn_b.deliveries
   end
 
@@ -215,7 +215,7 @@ class AgentsTest < Minitest::Test
     @agents.register(B, @conn_b)
     @agents.deliver(A, delivery(ts: "1", authority: "UTAD"))
     @agents.deliver(A, delivery(ts: "2", authority: "UJANE", sender: "UJANE"))
-    @agents.post(agent: A, channel_id: CH, text: "@#{B} go", in_reply_to_ts: "1")
+    @agents.post(agent: A, channel_id: CH, text: "#{B}: go", in_reply_to_ts: "1")
     assert_empty @conn_b.deliveries
   end
 
@@ -224,7 +224,7 @@ class AgentsTest < Minitest::Test
     @agents.deliver(A, delivery(authority: "UJANE", sender: "UJANE", sender_role: "authorized"))
     restarted = build_agents(limit: 10)
     restarted.register(B, @conn_b)
-    restarted.post(agent: A, channel_id: CH, text: "@#{B} delete it")
+    restarted.post(agent: A, channel_id: CH, text: "#{B}: delete it")
     assert_empty @conn_b.deliveries
     assert_requested @post_stub
   end
@@ -232,7 +232,7 @@ class AgentsTest < Minitest::Test
   def test_restart_without_history_defaults_to_owner
     restarted = build_agents(limit: 10)
     restarted.register(B, @conn_b)
-    restarted.post(agent: A, channel_id: CH, text: "@#{B} go")
+    restarted.post(agent: A, channel_id: CH, text: "#{B}: go")
     assert_equal "UTAD", @conn_b.deliveries.first[:authority]
   end
 
@@ -241,7 +241,7 @@ class AgentsTest < Minitest::Test
     @agents.register(B, @conn_b)
     @agents.deliver(A, delivery(ts: "1", authority: "UJANE", sender: "UJANE", sender_role: "authorized"))
     @agents.deliver(A, delivery(ts: "2", authority: "UTAD"))
-    @agents.post(agent: A, channel_id: CH, text: "@#{B} delete it")
+    @agents.post(agent: A, channel_id: CH, text: "#{B}: delete it")
     assert_empty @conn_b.deliveries
   end
 
@@ -250,9 +250,9 @@ class AgentsTest < Minitest::Test
     @agents.register(B, @conn_b)
     @agents.deliver(A, delivery(ts: "1", authority: "UJANE", sender: "UJANE", sender_role: "authorized"))
     @agents.deliver(A, delivery(ts: "2", authority: "UTAD"))
-    @agents.post(agent: A, channel_id: CH, text: "@#{B} delete it")
+    @agents.post(agent: A, channel_id: CH, text: "#{B}: delete it")
     @agents.deliver(A, delivery(ts: "3", authority: "UTAD"))
-    @agents.post(agent: A, channel_id: CH, text: "@#{B} go")
+    @agents.post(agent: A, channel_id: CH, text: "#{B}: go")
     assert_equal(["UTAD"], @conn_b.deliveries.map { |m| m[:authority] })
   end
 
@@ -266,7 +266,7 @@ class AgentsTest < Minitest::Test
     @agents.deliver(A, delivery(ts: "1", authority: "UJANE", sender: "UJANE", sender_role: "authorized"))
     @agents.post(agent: A, channel_id: CH, text: "on it")
     @agents.deliver(A, peer_delivery("2"))
-    @agents.post(agent: A, channel_id: CH, text: "@#{B} delete it")
+    @agents.post(agent: A, channel_id: CH, text: "#{B}: delete it")
     assert_empty @conn_b.deliveries
   end
 
@@ -277,7 +277,7 @@ class AgentsTest < Minitest::Test
     @agents.post(agent: A, channel_id: CH, text: "on it")
     @agents.deliver(A, peer_delivery("2"))
     @agents.deliver(A, delivery(ts: "3", authority: "UTAD"))
-    @agents.post(agent: A, channel_id: CH, text: "@#{B} go")
+    @agents.post(agent: A, channel_id: CH, text: "#{B}: go")
     assert_equal(["UTAD"], @conn_b.deliveries.map { |m| m[:authority] })
   end
 
@@ -289,7 +289,7 @@ class AgentsTest < Minitest::Test
     @agents.deliver(A, delivery(ts: "1", authority: "UJANE", sender: "UJANE", sender_role: "authorized"))
     @agents.post(agent: A, channel_id: CH, text: "on it")
     @agents.deliver(A, delivery(ts: "2", authority: "UBOB", sender: "UBOB", sender_role: "authorized"))
-    @agents.post(agent: A, channel_id: CH, text: "@#{B} go")
+    @agents.post(agent: A, channel_id: CH, text: "#{B}: go")
     assert_empty @conn_b.deliveries
   end
 
@@ -298,7 +298,7 @@ class AgentsTest < Minitest::Test
     @agents.register(B, @conn_b)
     @agents.deliver(A, delivery(authority: "UJANE", sender: "UJANE", sender_role: "authorized"))
     @agents.post(agent: A, channel_id: CH, text: "status")
-    @agents.post(agent: A, channel_id: CH, text: "@#{B} go")
+    @agents.post(agent: A, channel_id: CH, text: "#{B}: go")
     assert_empty @conn_b.deliveries
   end
 
@@ -308,21 +308,21 @@ class AgentsTest < Minitest::Test
     restarted = build_agents(limit: 10)
     restarted.register(B, @conn_b)
     restarted.deliver(A, delivery(ts: "2", authority: "UTAD"))
-    restarted.post(agent: A, channel_id: CH, text: "@#{B} delete it")
+    restarted.post(agent: A, channel_id: CH, text: "#{B}: delete it")
     assert_empty @conn_b.deliveries
   end
 
   def test_loop_guard_pauses_after_limit
     agents = build_agents(limit: 2)
     agents.register(B, @conn_b)
-    3.times { agents.post(agent: A, channel_id: CH, text: "@#{B} ping", thread_ts: "50.0") }
+    3.times { agents.post(agent: A, channel_id: CH, text: "#{B}: ping", thread_ts: "50.0") }
     assert_equal 2, @conn_b.deliveries.size
     notes = posted_bodies.select { |b| b["username"] == "conclave" }
     assert_equal 1, notes.size
     assert_equal "50.0", notes.first["thread_ts"]
     assert_equal "Pausing agent-to-agent messages in this thread after 2 exchanges. @tad, reply here to continue.",
                  notes.first["text"]
-    agents.post(agent: A, channel_id: CH, text: "@#{B} ping", thread_ts: "50.0")
+    agents.post(agent: A, channel_id: CH, text: "#{B}: ping", thread_ts: "50.0")
     assert_equal(1, posted_bodies.count { |b| b["username"] == "conclave" })
   end
 
@@ -334,7 +334,7 @@ class AgentsTest < Minitest::Test
   def test_loop_guard_counts_top_level_posts_per_channel
     agents = build_agents(limit: 1)
     agents.register(B, @conn_b)
-    2.times { agents.post(agent: A, channel_id: CH, text: "@#{B} ping") }
+    2.times { agents.post(agent: A, channel_id: CH, text: "#{B}: ping") }
     assert_equal 1, @conn_b.deliveries.size
     note = posted_bodies.find { |b| b["username"] == "conclave" }
     refute note.key?("thread_ts")
@@ -344,7 +344,7 @@ class AgentsTest < Minitest::Test
     stub_distinct_post_ts
     agents = build_agents(limit: 2)
     agents.register(B, @conn_b)
-    4.times { agents.post(agent: A, channel_id: CH, text: "@#{B} ping") }
+    4.times { agents.post(agent: A, channel_id: CH, text: "#{B}: ping") }
     assert_equal 2, @conn_b.deliveries.size
     notes = posted_bodies.select { |b| b["username"] == "conclave" }
     assert_equal 1, notes.size
@@ -357,37 +357,37 @@ class AgentsTest < Minitest::Test
     stub_distinct_post_ts
     agents = build_agents(limit: 1)
     agents.register(B, @conn_b)
-    2.times { agents.post(agent: A, channel_id: CH, text: "@#{B} ping") }
-    agents.post(agent: A, channel_id: CH, text: "@#{B} in thread", thread_ts: "50.0")
-    assert_equal(["@#{B} ping", "@#{B} in thread"], @conn_b.deliveries.map { |m| m[:text] })
+    2.times { agents.post(agent: A, channel_id: CH, text: "#{B}: ping") }
+    agents.post(agent: A, channel_id: CH, text: "#{B}: in thread", thread_ts: "50.0")
+    assert_equal(["#{B}: ping", "#{B}: in thread"], @conn_b.deliveries.map { |m| m[:text] })
   end
 
   def test_owner_post_anywhere_in_channel_resets_channel_count
     stub_distinct_post_ts
     agents = build_agents(limit: 1)
     agents.register(B, @conn_b)
-    2.times { agents.post(agent: A, channel_id: CH, text: "@#{B} ping") }
+    2.times { agents.post(agent: A, channel_id: CH, text: "#{B}: ping") }
     agents.human_posted(channel_id: CH, thread_key: "50.0", user_id: "UOUTSIDER")
-    agents.post(agent: A, channel_id: CH, text: "@#{B} ping")
+    agents.post(agent: A, channel_id: CH, text: "#{B}: ping")
     assert_equal 1, @conn_b.deliveries.size
 
     agents.human_posted(channel_id: CH, thread_key: "50.0", user_id: "UTAD")
-    agents.post(agent: A, channel_id: CH, text: "@#{B} ping")
+    agents.post(agent: A, channel_id: CH, text: "#{B}: ping")
     assert_equal 2, @conn_b.deliveries.size
   end
 
   def test_human_post_resets_loop_guard
     agents = build_agents(limit: 1)
     agents.register(B, @conn_b)
-    2.times { agents.post(agent: A, channel_id: CH, text: "@#{B} ping", thread_ts: "50.0") }
+    2.times { agents.post(agent: A, channel_id: CH, text: "#{B}: ping", thread_ts: "50.0") }
     assert_equal 1, @conn_b.deliveries.size
 
     agents.human_posted(channel_id: CH, thread_key: "50.0", user_id: "UOUTSIDER")
-    agents.post(agent: A, channel_id: CH, text: "@#{B} ping", thread_ts: "50.0")
+    agents.post(agent: A, channel_id: CH, text: "#{B}: ping", thread_ts: "50.0")
     assert_equal 1, @conn_b.deliveries.size
 
     agents.human_posted(channel_id: CH, thread_key: "50.0", user_id: "UTAD")
-    agents.post(agent: A, channel_id: CH, text: "@#{B} ping", thread_ts: "50.0")
+    agents.post(agent: A, channel_id: CH, text: "#{B}: ping", thread_ts: "50.0")
     assert_equal 2, @conn_b.deliveries.size
   end
 
@@ -395,9 +395,9 @@ class AgentsTest < Minitest::Test
     agents = build_agents(limit: 1)
     @store.authorize(B, "UJANE")
     agents.register(B, @conn_b)
-    2.times { agents.post(agent: A, channel_id: CH, text: "@#{B} ping", thread_ts: "50.0") }
+    2.times { agents.post(agent: A, channel_id: CH, text: "#{B}: ping", thread_ts: "50.0") }
     agents.human_posted(channel_id: CH, thread_key: "50.0", user_id: "UJANE")
-    agents.post(agent: A, channel_id: CH, text: "@#{B} ping", thread_ts: "50.0")
+    agents.post(agent: A, channel_id: CH, text: "#{B}: ping", thread_ts: "50.0")
     assert_equal 2, @conn_b.deliveries.size
   end
 
@@ -408,14 +408,14 @@ class AgentsTest < Minitest::Test
     @agents.deliver(A, delivery(ts: "old", authority: "UJANE"))
     210.times { |i| @agents.deliver(A, delivery(ts: i.to_s, authority: "UTAD")) }
     @agents.register(B, @conn_b)
-    @agents.post(agent: A, channel_id: CH, text: "@#{B} go", in_reply_to_ts: "old")
+    @agents.post(agent: A, channel_id: CH, text: "#{B}: go", in_reply_to_ts: "old")
     assert_empty @conn_b.deliveries
     assert_requested @post_stub
   end
 
   def test_unknown_in_reply_to_fails_closed
     @agents.register(B, @conn_b)
-    @agents.post(agent: A, channel_id: CH, text: "@#{B} go", in_reply_to_ts: "nope")
+    @agents.post(agent: A, channel_id: CH, text: "#{B}: go", in_reply_to_ts: "nope")
     assert_empty @conn_b.deliveries
     assert_requested @post_stub
   end
@@ -424,7 +424,7 @@ class AgentsTest < Minitest::Test
     @agents.register(B, @conn_b)
     @agents.deliver(A, delivery(ts: "1", authority: "UTAD"))
     @agents.deliver(A, delivery(ts: "2", authority: nil))
-    @agents.post(agent: A, channel_id: CH, text: "@#{B} go", in_reply_to_ts: "1")
+    @agents.post(agent: A, channel_id: CH, text: "#{B}: go", in_reply_to_ts: "1")
     assert_empty @conn_b.deliveries
   end
 
@@ -435,7 +435,7 @@ class AgentsTest < Minitest::Test
     @agents.deliver(A, delivery(ts: "1", authority: "UJANE", sender: "UJANE"))
     @agents.post(agent: A, channel_id: CH, text: "on it")
     @agents.deliver(A, delivery(ts: "2", authority: "UTAD"))
-    @agents.post(agent: A, channel_id: CH, text: "@#{B} go", in_reply_to_ts: "1")
+    @agents.post(agent: A, channel_id: CH, text: "#{B}: go", in_reply_to_ts: "1")
     assert_equal "UJANE", @conn_b.deliveries.first[:authority]
   end
 
@@ -444,8 +444,8 @@ class AgentsTest < Minitest::Test
     agents.register(B, @conn_b)
     stub_slack(:post, "chat.postMessage", request_body: hash_including("username" => "conclave"),
                                           response_body: { "ok" => false, "error" => "boom" })
-    agents.post(agent: A, channel_id: CH, text: "@#{B} one", thread_ts: "50.0")
-    _, err = capture_io { agents.post(agent: A, channel_id: CH, text: "@#{B} two", thread_ts: "50.0") }
+    agents.post(agent: A, channel_id: CH, text: "#{B}: one", thread_ts: "50.0")
+    _, err = capture_io { agents.post(agent: A, channel_id: CH, text: "#{B}: two", thread_ts: "50.0") }
     assert_match(/pause note failed.*boom/, err)
     assert_equal 1, @conn_b.deliveries.size
   end
@@ -481,7 +481,7 @@ class AgentsTest < Minitest::Test
   def test_pause_note_is_recorded_with_owner_authority
     agents = build_agents(limit: 1)
     agents.register(B, @conn_b)
-    2.times { agents.post(agent: A, channel_id: CH, text: "@#{B} ping", thread_ts: "50.0") }
+    2.times { agents.post(agent: A, channel_id: CH, text: "#{B}: ping", thread_ts: "50.0") }
     assert_equal "UTAD", @store.post_authority(CH, "100.1")
   end
 end

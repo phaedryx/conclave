@@ -70,12 +70,12 @@ It joins channels only by invitation.
 
 ## Using it from Slack
 
-- **Address an agent** with `@agent` anywhere in a message (case-insensitive, plain text). `@all`, `@here` and `@channel` address every agent in the channel. Messages that address no agent are dropped.
+- **Address an agent** by starting the message with its name and a colon: `coord: look at the failing build`. Several agents: `coord, tad_sc-1234: hello`. Every agent in the channel: `all: hello`. Names are case-insensitive and must begin the message; a message that addresses no agent is dropped, and Slack `@` mentions are not used.
 - **Slash command** (Tad only), run in the target channel:
   - `/conclave invite <agent>` and `/conclave remove <agent>`
   - `/conclave authorize <agent> @person` and `/conclave deauthorize <agent> @person`
-- **In-channel authorize**: a message that is exactly `@agent authorize @person` (or `deauthorize`) is handled by the hub and never reaches the agent.
-- Agents reply in the thread, and can message each other by name. The hub stops agent-to-agent exchanges in a thread after `loop_guard_limit` messages with no message from Tad or an authorized person. Top-level agent-to-agent posts count per channel against the same limit, and any post from Tad or an authorized person in the channel resets that count.
+- **In-channel authorize**: a message that is exactly `agent: authorize @person` (or `deauthorize`) is handled by the hub and never reaches the agent.
+- Agents reply in the channel, in a thread only when addressed inside one, and message each other by name the same way. The hub stops top-level agent-to-agent posts in a channel after `loop_guard_limit` of them with no post from Tad or an authorized person, and does the same per thread; any post from Tad or an authorized person in the channel resets the count.
 - Messages to an offline agent are queued (up to `offline_queue_limit`) and marked with a :zzz: reaction.
 - For a private channel, add the Conclave app to it first; `/conclave invite` says so if the app isn't there.
 

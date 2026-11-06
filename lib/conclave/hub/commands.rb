@@ -2,7 +2,7 @@
 
 module Conclave
   class Hub
-    # Owner-only management commands: in-channel "@agent authorize <@U…>" and the /conclave slash command.
+    # Owner-only management commands: in-channel "agent: authorize <@U…>" and the /conclave slash command.
     class Commands
       ONLY_OWNER = "Only Tad can do that."
       USAGE = "Usage: /conclave invite <agent> | remove <agent> | authorize <agent> @person | " \
@@ -10,7 +10,7 @@ module Conclave
       PRIVATE_CHANNEL = "Add the Conclave app to this private channel first."
       PRIVATE_CHANNEL_CODE = "method_not_supported_for_channel_type"
       USER_REF = /<@(?<user>[UW][A-Z0-9]+)(?:\|[^>]*)?>/
-      TEXT_COMMAND = /\A\s*@(?<agent>[\w-]+)\s+(?<verb>authorize|deauthorize)\s+#{USER_REF}\s*\z/i
+      TEXT_COMMAND = /\A\s*(?<agent>[\w-]+)\s*:\s*(?<verb>authorize|deauthorize)\s+#{USER_REF}\s*\z/i
       SLASH_USER_COMMAND = /\A(?<verb>authorize|deauthorize)\s+(?<agent>\S+)\s+#{USER_REF}\s*\z/i
       SLASH_AGENT_COMMAND = /\A(?<verb>invite|remove)\s+(?<agent>\S+)\s*\z/i
 

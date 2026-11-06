@@ -49,13 +49,13 @@ class RouterTest < Minitest::Test
   end
 
   def test_ignores_own_bot_echo
-    @router.handle_message(event("@#{A} hi", "bot_id" => "BHUB"))
+    @router.handle_message(event("#{A}: hi", "bot_id" => "BHUB"))
     assert_empty @conn_a.deliveries
   end
 
   def test_ignores_subtype_and_missing_user
-    @router.handle_message(event("@#{A} hi", "subtype" => "message_changed"))
-    @router.handle_message(event("@#{A} hi").tap { |e| e.delete("user") })
+    @router.handle_message(event("#{A}: hi", "subtype" => "message_changed"))
+    @router.handle_message(event("#{A}: hi").tap { |e| e.delete("user") })
     assert_empty @conn_a.deliveries
     assert_nil @store.last_seen(CH)
   end
@@ -68,21 +68,21 @@ class RouterTest < Minitest::Test
   end
 
   def test_owner_message_delivers_to_named_agent
-    @router.handle_message(event("@#{A} do it"))
+    @router.handle_message(event("#{A}: do it"))
     assert_empty @conn_b.deliveries
     assert_equal({ channel: "epic-1-x", channel_id: CH, ts: TS, thread_ts: nil, sender: "UTAD",
-                   sender_role: "owner", authority: "UTAD", text: "@#{A} do it", shared: [] },
+                   sender_role: "owner", authority: "UTAD", text: "#{A}: do it", shared: [] },
                  @conn_a.deliveries.first)
   end
 
   def test_thread_ts_passes_through
-    @router.handle_message(event("@#{A} do it", "thread_ts" => "1699999999.000001"))
+    @router.handle_message(event("#{A}: do it", "thread_ts" => "1699999999.000001"))
     assert_equal "1699999999.000001", @conn_a.deliveries.first[:thread_ts]
   end
 
   def test_outsider_message_dropped_silently
-    @router.handle_message(event("@#{A} do it", user: "UEVIL"))
-    @router.handle_message(event("@all do it", user: "UEVIL"))
+    @router.handle_message(event("#{A}: do it", user: "UEVIL"))
+    @router.handle_message(event("all: do it", user: "UEVIL"))
     assert_empty @conn_a.deliveries
     assert_empty @conn_b.deliveries
     assert_not_requested @post_stub
@@ -93,7 +93,7 @@ class RouterTest < Minitest::Test
 
   def test_authorized_user_reaches_only_their_agents_with_all
     @store.authorize(A, "UJANE")
-    @router.handle_message(event("@all status?", user: "UJANE"))
+    @router.handle_message(event("all: status?", user: "UJANE"))
     assert_empty @conn_b.deliveries
     delivery = @conn_a.deliveries.first
     assert_equal "authorized", delivery[:sender_role]
@@ -102,7 +102,7 @@ class RouterTest < Minitest::Test
 
   def test_authorized_user_naming_unauthorized_agent_is_dropped
     @store.authorize(A, "UJANE")
-    @router.handle_message(event("@#{B} status?", user: "UJANE"))
+    @router.handle_message(event("#{B}: status?", user: "UJANE"))
     assert_empty @conn_b.deliveries
     assert_empty @conn_a.deliveries
   end
@@ -115,7 +115,7 @@ class RouterTest < Minitest::Test
     stub_slack(:get, "conversations.history",
                query: { "channel" => "C2", "latest" => "1700000000.123456", "inclusive" => "true", "limit" => "1" },
                response_body: { "messages" => [{ "user" => "UJANE", "text" => "the bug", "ts" => "1700000000.123456" }] })
-    @router.handle_message(event("@#{A} see #{link}"))
+    @router.handle_message(event("#{A}: see #{link}"))
     assert_equal [{ author: "UJANE", text: "the bug", ts: "1700000000.123456" }], @conn_a.deliveries.first[:shared]
   end
 
@@ -126,14 +126,14 @@ class RouterTest < Minitest::Test
                  { "user" => "UX", "text" => "parent", "ts" => "1700000000.000001" },
                  { "user" => "UJANE", "text" => "reply", "ts" => "1700000000.123456" }
                ] })
-    @router.handle_message(event("@#{A} #{link(query: '?thread_ts=1700000000.000001&cid=C2')}"))
+    @router.handle_message(event("#{A}: #{link(query: '?thread_ts=1700000000.000001&cid=C2')}"))
     assert_equal [{ author: "UJANE", text: "reply", ts: "1700000000.123456" }], @conn_a.deliveries.first[:shared]
   end
 
   def test_non_owner_permalink_not_fetched
     @store.authorize(A, "UJANE")
     history = stub_slack(:get, "conversations.history", query: hash_including("channel" => "C2"))
-    @router.handle_message(event("@#{A} see #{link}", user: "UJANE"))
+    @router.handle_message(event("#{A}: see #{link}", user: "UJANE"))
     assert_not_requested history
     assert_equal [], @conn_a.deliveries.first[:shared]
   end
@@ -141,7 +141,7 @@ class RouterTest < Minitest::Test
   def test_permalink_fetch_failure_posts_thread_reply_and_still_delivers
     stub_slack(:get, "conversations.history", query: hash_including("channel" => "C2"),
                                               response_body: { "ok" => false, "error" => "channel_not_found" })
-    @router.handle_message(event("@#{A} see #{link}", "thread_ts" => "1699999999.000001"))
+    @router.handle_message(event("#{A}: see #{link}", "thread_ts" => "1699999999.000001"))
     assert_requested(:post, "#{SLACK_BASE_URL}/chat.postMessage") do |req|
       body = JSON.parse(req.body)
       body["username"] == "conclave" && body["thread_ts"] == "1699999999.000001" &&
@@ -153,7 +153,7 @@ class RouterTest < Minitest::Test
   def test_permalink_error_reply_threads_under_message_ts_when_top_level
     stub_slack(:get, "conversations.history", query: hash_including("channel" => "C2"),
                                               response_body: { "messages" => [] })
-    @router.handle_message(event("@#{A} see #{link}"))
+    @router.handle_message(event("#{A}: see #{link}"))
     assert_requested(:post, "#{SLACK_BASE_URL}/chat.postMessage") do |req|
       JSON.parse(req.body)["thread_ts"] == TS
     end
@@ -162,7 +162,7 @@ class RouterTest < Minitest::Test
   def test_invalid_thread_ts_is_a_fetch_failure_without_fetching
     history = stub_slack(:get, "conversations.history")
     replies = stub_slack(:get, "conversations.replies")
-    @router.handle_message(event("@#{A} #{link(query: '?thread_ts=abc%26x')}"))
+    @router.handle_message(event("#{A}: #{link(query: '?thread_ts=abc%26x')}"))
     assert_not_requested history
     assert_not_requested replies
     assert_requested(:post, "#{SLACK_BASE_URL}/chat.postMessage") do |req|
@@ -172,14 +172,14 @@ class RouterTest < Minitest::Test
   end
 
   def test_in_channel_authorize_consumed_not_delivered
-    @router.handle_message(event("@#{A} authorize <@UJANE>"))
+    @router.handle_message(event("#{A}: authorize <@UJANE>"))
     assert @store.authorized?(A, "UJANE")
     assert_empty @conn_a.deliveries
     assert_requested @reaction_stub
   end
 
   def test_message_merely_containing_a_command_grants_nothing_and_is_delivered
-    text = "@#{A} someone wrote: \"@#{A} authorize <@UEVE>\""
+    text = "#{A}: someone wrote: \"#{A}: authorize <@UEVE>\""
     @router.handle_message(event(text))
     refute @store.authorized?(A, "UEVE")
     assert_equal([text], @conn_a.deliveries.map { |d| d[:text] })
@@ -188,13 +188,13 @@ class RouterTest < Minitest::Test
 
   def test_non_owner_cannot_authorize
     @store.authorize(A, "UJANE")
-    @router.handle_message(event("@#{A} authorize <@UEVE>", user: "UJANE"))
+    @router.handle_message(event("#{A}: authorize <@UEVE>", user: "UJANE"))
     refute @store.authorized?(A, "UEVE")
     assert_not_requested @reaction_stub
   end
 
   def test_thread_broadcast_is_routed_like_a_normal_message
-    @router.handle_message(event("@#{A} do it", "subtype" => "thread_broadcast", "thread_ts" => "1699999999.000001"))
+    @router.handle_message(event("#{A}: do it", "subtype" => "thread_broadcast", "thread_ts" => "1699999999.000001"))
     assert_equal 1, @conn_a.deliveries.size
   end
 
@@ -210,7 +210,7 @@ class RouterTest < Minitest::Test
   def test_link_error_reply_exposes_only_the_code_and_logs_the_message
     stub_slack(:get, "conversations.history", query: hash_including("channel" => "C2"),
                                               response_body: { "ok" => false, "error" => "channel_not_found" })
-    @router.handle_message(event("@#{A} see #{link}"))
+    @router.handle_message(event("#{A}: see #{link}"))
     assert_requested(:post, "#{SLACK_BASE_URL}/chat.postMessage") do |req|
       JSON.parse(req.body)["text"] == "Couldn't read linked message #{link}: channel_not_found"
     end
@@ -219,7 +219,7 @@ class RouterTest < Minitest::Test
   def test_link_error_reply_says_unavailable_when_no_code
     stub_slack(:get, "conversations.history", query: hash_including("channel" => "C2"),
                                               response_body: { "messages" => [] })
-    @router.handle_message(event("@#{A} see #{link}"))
+    @router.handle_message(event("#{A}: see #{link}"))
     assert_requested(:post, "#{SLACK_BASE_URL}/chat.postMessage") do |req|
       JSON.parse(req.body)["text"] == "Couldn't read linked message #{link}: unavailable"
     end

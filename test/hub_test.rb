@@ -105,9 +105,9 @@ class HubTest < Minitest::Test
     history = stub_slack(:get, "conversations.history",
                          query: hash_including("channel" => CH, "oldest" => "1700000000.000100", "limit" => "200"),
                          response_body: { "messages" => [
-                           slack_message("UOUT", "@#{AGENT} hi", "1700000003.000100"),
-                           slack_message("UTAD", "@#{AGENT} please look", "1700000002.000100"),
-                           slack_message("UTAD", "@#{AGENT} already seen", "1700000000.000100")
+                           slack_message("UOUT", "#{AGENT}: hi", "1700000003.000100"),
+                           slack_message("UTAD", "#{AGENT}: please look", "1700000002.000100"),
+                           slack_message("UTAD", "#{AGENT}: already seen", "1700000000.000100")
                          ].map { |m| m.except("channel") } })
     hub.backfill
     assert_requested history
@@ -125,7 +125,7 @@ class HubTest < Minitest::Test
                                               status: 500, response_body: {})
     stub_slack(:get, "conversations.history", query: hash_including("channel" => CH),
                                               response_body: { "messages" => [
-                                                slack_message("UTAD", "@#{AGENT} go", "1700000002.000100")
+                                                slack_message("UTAD", "#{AGENT}: go", "1700000002.000100")
                                               ] })
     _out, err = capture_io { hub.backfill }
     assert_match(/backfill C0/, err)

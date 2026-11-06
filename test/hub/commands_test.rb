@@ -119,7 +119,7 @@ class CommandsTest < Minitest::Test
 
   def test_in_channel_authorize_grants_and_reacts
     stub = reaction_stub("white_check_mark")
-    assert @commands.handle_text(event("@#{A} authorize <@UJANE>"))
+    assert @commands.handle_text(event("#{A}: authorize <@UJANE>"))
     assert @store.authorized?(A, "UJANE")
     assert_requested stub
   end
@@ -127,26 +127,28 @@ class CommandsTest < Minitest::Test
   def test_in_channel_deauthorize_revokes
     @store.authorize(A, "UJANE")
     reaction_stub("white_check_mark")
-    assert @commands.handle_text(event("@#{A} deauthorize <@UJANE>"))
+    assert @commands.handle_text(event("#{A}: deauthorize <@UJANE>"))
     refute @store.authorized?(A, "UJANE")
   end
 
   def test_non_owner_cannot_authorize
     stub = stub_slack(:post, "reactions.add")
-    refute @commands.handle_text(event("@#{A} authorize <@UJANE>", user: "UJANE"))
+    refute @commands.handle_text(event("#{A}: authorize <@UJANE>", user: "UJANE"))
     refute @store.authorized?(A, "UJANE")
     assert_not_requested stub
   end
 
   def test_in_channel_authorize_for_non_member_agent_reacts_x_and_does_nothing
     stub = reaction_stub("x")
-    assert @commands.handle_text(event("@tad_sc-9999 authorize <@UJANE>"))
+    assert @commands.handle_text(event("tad_sc-9999: authorize <@UJANE>"))
     refute @store.authorized?("tad_sc-9999", "UJANE")
     assert_requested stub
   end
 
   def test_ordinary_text_is_not_a_command
-    refute @commands.handle_text(event("@#{A} please authorize the build"))
+    refute @commands.handle_text(event("#{A}: please authorize the build"))
+    refute @commands.handle_text(event("@#{A} authorize <@UJANE>")), "the old @ form is not a command"
+    refute @commands.handle_text(event("hey #{A}: authorize <@UJANE>")), "the name must start the message"
     refute @commands.handle_text(event("hello"))
     refute @commands.handle_text({ "text" => "x" })
   end
