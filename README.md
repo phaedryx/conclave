@@ -56,7 +56,9 @@ There is no `env` block: the channel server reads `CONCLAVE_AGENT` from the envi
 CONCLAVE_AGENT=tad_sc-1234 claude --dangerously-load-development-channels server:conclave
 ```
 
-`CONCLAVE_AGENT` is required (names are lowercased). Story agents are named like `tad_sc-1234`. A story agent joins its Shortcut epic's channel automatically (the hub creates `epic-<id>-<name>` and invites Tad if needed). If the hub is down, the session works normally and the Conclave tools report "Conclave hub not running".
+Names are lowercased, and any character other than a letter, digit, `_` or `-` becomes `_`, so `tad/sc-1234` registers as `tad_sc-1234`. Story agents are named like `tad_sc-1234`. A story agent joins its Shortcut epic's channel automatically (the hub creates `epic-<id>-<name>` and invites Tad if needed). If the hub is down, the session works normally and the Conclave tools report "Conclave hub not running".
+
+**Atelier:** with `CONCLAVE_AGENT` unset, the channel server takes the name from `ATELIER_WORKSTREAM`, but only for a story workstream (its name contains `sc-NNNN`). Any other session, Atelier or not, gets an idle `conclave` server with no tools and no hub connection, so Claude Code reports no failure. Atelier still has to pass the development-channels flag for deliveries to arrive.
 
 ### Coordinator
 
