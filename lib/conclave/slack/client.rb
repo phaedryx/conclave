@@ -73,6 +73,12 @@ module Conclave
         get("conversations.info", channel: channel)
       end
 
+      # One page of the workspace's channels; pass the previous page's response_metadata.next_cursor for the next.
+      def list_channels(cursor: nil)
+        get("conversations.list",
+            { types: "public_channel,private_channel", exclude_archived: true, limit: 200, cursor: cursor }.compact)
+      end
+
       # Must be called on a client built with the app-level (xapp-) token.
       def open_socket_connection
         post("apps.connections.open")["url"]

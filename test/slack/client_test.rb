@@ -89,6 +89,17 @@ class SlackClientTest < Minitest::Test
     assert_equal "C9", @client.channel_info(channel: "C9").dig("channel", "id")
   end
 
+  def test_list_channels_pages_with_cursor
+    query = { types: "public_channel,private_channel", exclude_archived: "true", limit: "200" }
+    stub_slack(:get, "conversations.list", query: query,
+                                           response_body: { "channels" => [{ "id" => "C1", "name" => "one" }],
+                                                            "response_metadata" => { "next_cursor" => "abc" } })
+    page2 = stub_slack(:get, "conversations.list", query: query.merge(cursor: "abc"), response_body: { "channels" => [] })
+    assert_equal "abc", @client.list_channels.dig("response_metadata", "next_cursor")
+    assert_equal [], @client.list_channels(cursor: "abc")["channels"]
+    assert_requested page2
+  end
+
   def test_slack_error_raises
     stub_slack(:post, "auth.test", response_body: { "ok" => false, "error" => "invalid_auth" })
     assert_raises(Conclave::Slack::Client::AuthenticationError) { @client.auth_test }

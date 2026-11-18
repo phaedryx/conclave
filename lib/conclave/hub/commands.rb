@@ -8,7 +8,6 @@ module Conclave
       USAGE = "Usage: /conclave invite <agent> | remove <agent> | authorize <agent> @person | " \
               "deauthorize <agent> @person"
       PRIVATE_CHANNEL = "Add the Conclave app to this private channel first."
-      PRIVATE_CHANNEL_CODE = "method_not_supported_for_channel_type"
       USER_REF = /<@(?<user>[UW][A-Z0-9]+)(?:\|[^>]*)?>/
       TEXT_COMMAND = /\A\s*(?<agent>[\w-]+)\s*:\s*(?<verb>authorize|deauthorize)\s+#{USER_REF}\s*\z/i
       SLASH_USER_COMMAND = /\A(?<verb>authorize|deauthorize)\s+(?<agent>\S+)\s+#{USER_REF}\s*\z/i
@@ -71,18 +70,14 @@ module Conclave
         "#{agent} removed from this channel."
       end
 
-      # A private channel can't be joined: the bot is either in it already (Tad added the app) or Tad must add it.
       def invite(agent, channel_id)
-        channel = @slack.channel_info(channel: channel_id)["channel"] || {}
-        if channel["is_private"]
-          return PRIVATE_CHANNEL unless channel["is_member"]
-        else
-          @slack.join(channel: channel_id)
-        end
+        ChannelJoin.ensure(@slack, channel_id)
         @store.add_membership(agent, channel_id)
         "#{agent} invited to this channel."
+      rescue ChannelJoin::Private
+        PRIVATE_CHANNEL
       rescue Slack::Client::Error => e
-        e.code == PRIVATE_CHANNEL_CODE ? PRIVATE_CHANNEL : "Couldn't join this channel: #{e.message}"
+        "Couldn't join this channel: #{e.message}"
       end
 
       def react(event, name)
