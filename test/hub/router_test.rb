@@ -53,6 +53,15 @@ class RouterTest < Minitest::Test
     assert_empty @conn_a.deliveries
   end
 
+  # A hub notice starts with an addressing prefix; Slack's echo of it must not be delivered a second time.
+  def test_ignores_echo_of_a_hub_notice
+    echo = event("#{A}, #{B}: Tad added you to #epic-1-x.", "subtype" => "bot_message", "bot_id" => "BHUB",
+                                                            "username" => "conclave").except("user")
+    @router.handle_message(echo)
+    assert_empty @conn_a.deliveries
+    assert_empty @conn_b.deliveries
+  end
+
   def test_ignores_subtype_and_missing_user
     @router.handle_message(event("#{A}: hi", "subtype" => "message_changed"))
     @router.handle_message(event("#{A}: hi").tap { |e| e.delete("user") })
