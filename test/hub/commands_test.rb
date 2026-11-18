@@ -5,13 +5,37 @@ require "test_helper"
 class CommandsTest < Minitest::Test
   A = "tad_sc-1234"
   CH = "C1"
+  BAD_NAME = "Channel names are lowercase letters, numbers, hyphens and underscores, up to 80 characters."
+
+  class FakeNotices
+    attr_reader :added_calls
+
+    def initialize
+      @added_calls = []
+    end
+
+    def added(names, channel_id)
+      @added_calls << [names, channel_id]
+    end
+  end
 
   def setup
     @store = Conclave::Store.new(":memory:")
     @authority = Conclave::Hub::Authority.new(owner: "UTAD", store: @store)
     @slack = Conclave::Slack::Client.new(token: "xoxb-test")
-    @commands = Conclave::Hub::Commands.new(store: @store, authority: @authority, slack: @slack, owner: "UTAD")
+    @notices = FakeNotices.new
+    @commands = Conclave::Hub::Commands.new(store: @store, authority: @authority, slack: @slack, owner: "UTAD",
+                                            notices: @notices)
     @store.add_membership(A, CH)
+  end
+
+  def create_stub(name = "billing-rework")
+    stub_slack(:post, "conversations.create", request_body: { name: name, is_private: false },
+                                              response_body: { "channel" => { "id" => "CNEW" } })
+  end
+
+  def invite_stub
+    stub_slack(:post, "conversations.invite", request_body: { channel: "CNEW", users: "UTAD" })
   end
 
   def event(text, user: "UTAD")
@@ -38,6 +62,98 @@ class CommandsTest < Minitest::Test
     @commands.handle_slash({ "user_id" => "UTAD", "channel_id" => "C2", "text" => "invite tad_sc-9" })
     assert_requested join
     assert_equal ["C2"], @store.memberships("tad_sc-9")
+  end
+
+  def test_slash_invite_sends_notice
+    channel_info_stub("C2")
+    stub_slack(:post, "conversations.join")
+    @commands.handle_slash({ "user_id" => "UTAD", "channel_id" => "C2", "text" => "invite tad_sc-9" })
+    assert_equal [[["tad_sc-9"], "C2"]], @notices.added_calls
+  end
+
+  def test_slash_invite_of_a_member_says_so_and_sends_no_notice
+    join = stub_slack(:post, "conversations.join")
+    assert_equal "tad_sc-1234 is already in this channel.", @commands.handle_slash(slash("invite #{A}"))
+    assert_not_requested join
+    assert_empty @notices.added_calls
+  end
+
+  def test_slash_invite_failure_sends_no_notice
+    channel_info_stub(CH, is_private: true, is_member: false)
+    @commands.handle_slash(slash("invite tad_sc-9"))
+    assert_empty @notices.added_calls
+  end
+
+  def test_slash_channel_creates_invites_tad_adds_agents_and_notifies
+    @store.remember_agent(A)
+    @store.remember_agent("coord")
+    create = create_stub
+    invite = invite_stub
+    reply = @commands.handle_slash(slash("channel billing-rework #{A} coord"))
+    assert_equal "Created #billing-rework with tad_sc-1234, coord.", reply
+    assert_requested create
+    assert_requested invite
+    assert_equal [A, "coord"], @store.members("CNEW")
+    assert_equal [[[A, "coord"], "CNEW"]], @notices.added_calls
+  end
+
+  def test_slash_channel_normalizes_name_and_dedupes_agents
+    @store.remember_agent(A)
+    create_stub
+    invite_stub
+    reply = @commands.handle_slash(slash("channel #Billing-Rework #{A} TAD_SC-1234"))
+    assert_equal "Created #billing-rework with tad_sc-1234.", reply
+    assert_equal [A], @store.members("CNEW")
+    assert_equal [[[A], "CNEW"]], @notices.added_calls
+  end
+
+  def test_slash_channel_rejects_unknown_agents_and_creates_nothing
+    @store.remember_agent(A)
+    create = create_stub("x")
+    assert_equal "Unknown agent: coord.", @commands.handle_slash(slash("channel x #{A} coord"))
+    assert_equal "Unknown agents: coord, nobody.", @commands.handle_slash(slash("channel x coord nobody"))
+    assert_not_requested create
+    assert_empty @notices.added_calls
+  end
+
+  def test_slash_channel_rejects_bad_names
+    @store.remember_agent(A)
+    create = stub_slack(:post, "conversations.create")
+    ["channel bad.name #{A}", "channel #{'x' * 81} #{A}", "channel has\u00a0space #{A}"].each do |text|
+      assert_equal BAD_NAME, @commands.handle_slash(slash(text)), text
+    end
+    assert_not_requested create
+  end
+
+  def test_slash_channel_name_taken_points_to_invite
+    @store.remember_agent(A)
+    stub_slack(:post, "conversations.create", response_body: { "ok" => false, "error" => "name_taken" })
+    reply = @commands.handle_slash(slash("channel billing-rework #{A}"))
+    assert_equal "#billing-rework already exists. Run /conclave invite from inside it.", reply
+    assert_equal [CH], @store.memberships(A)
+    assert_empty @notices.added_calls
+  end
+
+  def test_slash_channel_other_create_error
+    @store.remember_agent(A)
+    stub_slack(:post, "conversations.create", response_body: { "ok" => false, "error" => "ratelimited" })
+    reply = @commands.handle_slash(slash("channel billing-rework #{A}"))
+    assert_equal "Couldn't create #billing-rework: Slack API error: ratelimited", reply
+  end
+
+  def test_slash_channel_reports_failed_owner_invite_in_reply
+    @store.remember_agent(A)
+    create_stub
+    stub_slack(:post, "conversations.invite", response_body: { "ok" => false, "error" => "already_in_channel" })
+    reply = @commands.handle_slash(slash("channel billing-rework #{A}"))
+    assert_equal "Created #billing-rework with tad_sc-1234. Couldn't invite you: Slack API error: already_in_channel",
+                 reply
+    assert_equal [A], @store.members("CNEW")
+    assert_equal [[[A], "CNEW"]], @notices.added_calls
+  end
+
+  def test_slash_channel_without_agents_is_usage
+    assert_equal Conclave::Hub::Commands::USAGE, @commands.handle_slash(slash("channel billing-rework"))
   end
 
   def test_slash_invite_private_channel_message
@@ -110,8 +226,8 @@ class CommandsTest < Minitest::Test
   end
 
   def test_slash_unparseable_returns_usage
-    expected = "Usage: /conclave invite <agent> | remove <agent> | authorize <agent> @person | " \
-               "deauthorize <agent> @person"
+    expected = "Usage: /conclave invite <agent> | remove <agent> | channel <name> <agent> [<agent>…] | " \
+               "authorize <agent> @person | deauthorize <agent> @person"
     ["", "frobnicate", "invite", "authorize #{A}", "authorize #{A} jane"].each do |text|
       assert_equal expected, @commands.handle_slash(slash(text))
     end

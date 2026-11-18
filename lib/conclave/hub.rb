@@ -105,7 +105,8 @@ module Conclave
       @agents = Agents.new(store: @store, authority: authority, slack: @slack,
                            loop_guard_limit: config.loop_guard_limit, queue_limit: config.offline_queue_limit)
       notices = Notices.new(agents: @agents, slack: @slack, store: @store, owner: config.owner_user_id)
-      commands = Commands.new(store: @store, authority: authority, slack: @slack, owner: config.owner_user_id)
+      commands = Commands.new(store: @store, authority: authority, slack: @slack, owner: config.owner_user_id,
+                              notices: notices)
       @router = Router.new(agents: @agents, authority: authority, store: @store, slack: @slack, bot_id: bot_id,
                            commands: commands)
       common = CommonChannel.new(store: @store, slack: @slack, notices: notices, channel: config.default_channel)

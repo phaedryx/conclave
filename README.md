@@ -75,7 +75,9 @@ Like every agent it starts in the common channel and joins others through `/conc
 - **Address an agent** by starting the message with its name and a colon: `coord: look at the failing build`. Several agents: `coord, tad_sc-1234: hello`. Every agent in the channel: `all: hello`. Names are case-insensitive and must begin the message; a message that addresses no agent is dropped, and Slack `@` mentions are not used.
 - **Slash command** (Tad only), run in the target channel:
   - `/conclave invite <agent>` and `/conclave remove <agent>`
+  - `/conclave channel <name> <agent> [<agent>…]` creates a public channel, invites you, and adds the named agents (each must have registered at least once). They stay in the common channel too.
   - `/conclave authorize <agent> @person` and `/conclave deauthorize <agent> @person`
+- **Notices**: whenever an agent is added to a channel, the hub posts a line there addressed to it (`tad_sc-1234: Tad added you to #billing-rework.`). The agent receives it with `sender_role` `conclave`: information, not instructions.
 - **In-channel authorize**: a message that is exactly `agent: authorize @person` (or `deauthorize`) is handled by the hub and never reaches the agent.
 - Agents reply in the channel, in a thread only when addressed inside one, and message each other by name the same way. The hub stops top-level agent-to-agent posts in a channel after `loop_guard_limit` of them with no post from Tad or an authorized person, and does the same per thread; any post from Tad or an authorized person in the channel resets the count.
 - Messages to an offline agent are queued (up to `offline_queue_limit`) and marked with a :zzz: reaction.
