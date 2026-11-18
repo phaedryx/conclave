@@ -156,10 +156,20 @@ module Conclave
         File.join(File.expand_path(env.fetch("CONCLAVE_HOME", "~/.conclave")), "hub.sock")
       end
 
-      # CONCLAVE_AGENT is a worktree name; the agent registers under its short name. Nil when unset or empty.
+      # CONCLAVE_AGENT, or else an Atelier story workstream's name (one with sc-NNNN); the agent registers under its
+      # short name, with characters addressing can't match replaced. Nil when neither applies.
       def self.agent_name(env = ENV)
         worktree = env["CONCLAVE_AGENT"].to_s.strip.downcase
-        AgentName.from_worktree(worktree) unless worktree.empty?
+        if worktree.empty?
+          worktree = env["ATELIER_WORKSTREAM"].to_s.strip.downcase
+          return unless AgentName.story_id(worktree)
+        end
+        AgentName.from_worktree(worktree.gsub(/[^\w-]/, "_")) unless worktree.empty?
+      end
+
+      # For a session with no agent name: answers MCP with no tools and no channel, so Claude Code reports no failure.
+      def self.run_idle
+        SyncStdioTransport.new(MCP::Server.new(name: "conclave", version: "0.1.0")).open
       end
 
       # Starts the hub connection in the background (a down hub is not fatal) and serves stdio until EOF.

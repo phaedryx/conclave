@@ -174,6 +174,25 @@ class ChannelServerTest < Minitest::Test
     assert_nil Server.agent_name({})
   end
 
+  def test_agent_name_falls_back_to_story_workstream
+    assert_equal "tad_sc-1234", Server.agent_name({ "ATELIER_WORKSTREAM" => "tad_sc-1234-fix-the-thing" })
+    assert_equal "tad_sc-1234", Server.agent_name({ "CONCLAVE_AGENT" => "", "ATELIER_WORKSTREAM" => "tad_sc-1234" })
+  end
+
+  def test_agent_name_ignores_workstream_without_story
+    assert_nil Server.agent_name({ "ATELIER_WORKSTREAM" => "accessibility" })
+  end
+
+  def test_conclave_agent_wins_over_workstream
+    assert_equal "coord", Server.agent_name({ "CONCLAVE_AGENT" => "coord", "ATELIER_WORKSTREAM" => "tad_sc-1234" })
+  end
+
+  # Addressing matches only word characters and hyphens, so a branch-style name must not keep its slashes.
+  def test_agent_name_replaces_characters_addressing_cannot_match
+    assert_equal "tad_sc-1234", Server.agent_name({ "ATELIER_WORKSTREAM" => "tad/sc-1234/fix-the-thing" })
+    assert_equal "tad_sc-1234", Server.agent_name({ "CONCLAVE_AGENT" => "tad/sc-1234" })
+  end
+
   def test_socket_path_uses_conclave_home
     assert_equal "/x/hub.sock", Server.socket_path({ "CONCLAVE_HOME" => "/x" })
     assert_equal File.join(Dir.home, ".conclave", "hub.sock"), Server.socket_path({})
