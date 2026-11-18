@@ -74,8 +74,9 @@ class StoreTest < Minitest::Test
     assert @store.consults?("a", "B1")
     refute @store.consults?("b", "B1")
     refute @store.consults?("a", "B2")
-    @store.unconsult("a", "U1")
+    assert @store.unconsult("a", "U1")
     refute @store.consults?("a", "B1")
+    refute @store.unconsult("a", "U1")
   end
 
   def test_record_agent_thread_caps_per_agent

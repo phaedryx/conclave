@@ -8,11 +8,16 @@ class CommandsTest < Minitest::Test
   BAD_NAME = "Channel names are lowercase letters, numbers, hyphens and underscores, up to 80 characters."
 
   class FakeNotices
-    attr_reader :added_calls
+    attr_reader :added_calls, :consult_calls
 
     def initialize
       @added_calls = []
+      @consult_calls = []
     end
+
+    def consulted(*args) = @consult_calls << [:consulted, *args]
+
+    def unconsulted(*args) = @consult_calls << [:unconsulted, *args]
 
     def added(names, channel_id)
       @added_calls << [names, channel_id]
@@ -34,7 +39,10 @@ class CommandsTest < Minitest::Test
     stub_slack(:get, "users.info", query: { "user" => user }, response_body: { "user" => { "id" => user }.merge(fields) })
   end
 
-  def taude_stub = user_info_stub("UTAUDE", "is_bot" => true, "profile" => { "bot_id" => "BTAUDE" })
+  def taude_stub
+    user_info_stub("UTAUDE", "is_bot" => true, "real_name" => "Taude",
+                             "profile" => { "bot_id" => "BTAUDE", "display_name" => "" })
+  end
 
   def create_stub(name = "billing-rework")
     stub_slack(:post, "conversations.create", request_body: { name: name, is_private: false },
@@ -275,11 +283,37 @@ class CommandsTest < Minitest::Test
     refute @store.authorized?("tad_sc-777", "UTAUDE")
     assert_equal "Unconsulted <@UTAUDE> for tad_sc-777.", @commands.handle_slash(slash("unconsult tad_sc-777 <@UTAUDE>"))
     refute @store.consults?("tad_sc-777", "BTAUDE")
+    assert_equal [[:consulted, "tad_sc-777", "Taude", "UTAUDE", CH], [:unconsulted, "tad_sc-777", "Taude", "UTAUDE", CH]],
+                 @notices.consult_calls
   end
 
-  def test_unconsult_and_deauthorize_do_not_look_up_the_user
+  def test_display_name_wins_over_real_name
+    user_info_stub("UTAUDE", "is_bot" => true, "real_name" => "Taude",
+                             "profile" => { "bot_id" => "BTAUDE", "display_name" => "taude-bot" })
+    @commands.handle_slash(slash("consult #{A} <@UTAUDE>"))
+    assert_equal "taude-bot", @notices.consult_calls.first[2]
+  end
+
+  def test_unconsult_without_a_grant_posts_no_notice
+    taude_stub
+    assert_equal "Unconsulted <@UTAUDE> for #{A}.", @commands.handle_slash(slash("unconsult #{A} <@UTAUDE>"))
+    assert_empty @notices.consult_calls
+  end
+
+  def test_unconsult_notice_falls_back_to_no_name_when_lookup_fails
+    @store.consult(A, "UGONE", "BGONE")
+    stub_slack(:get, "users.info", query: { "user" => "UGONE" }, response_body: { "ok" => false, "error" => "user_not_found" })
+    assert_equal "Unconsulted <@UGONE> for #{A}.", @commands.handle_slash(slash("unconsult #{A} <@UGONE>"))
+    assert_equal [[:unconsulted, A, nil, "UGONE", CH]], @notices.consult_calls
+  end
+
+  def test_refused_consult_posts_no_notice
+    @commands.handle_slash(slash("consult #{A} <@UJANE>"))
+    assert_empty @notices.consult_calls
+  end
+
+  def test_deauthorize_does_not_look_up_the_user
     stub = user_info_stub("UTAUDE", "is_bot" => true)
-    @commands.handle_slash(slash("unconsult #{A} <@UTAUDE>"))
     @commands.handle_slash(slash("deauthorize #{A} <@UTAUDE>"))
     assert_not_requested stub
   end
@@ -289,6 +323,7 @@ class CommandsTest < Minitest::Test
     stub = reaction_stub("white_check_mark")
     assert @commands.handle_text(event("#{A}: consult <@UTAUDE>"))
     assert @store.consults?(A, "BTAUDE")
+    assert_equal [[:consulted, A, "Taude", "UTAUDE", CH]], @notices.consult_calls
     assert_requested stub
   end
 

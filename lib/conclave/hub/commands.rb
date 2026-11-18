@@ -23,7 +23,7 @@ module Conclave
         @slack = slack
         @owner = owner
         @notices = notices
-        @grants = Grants.new(store: store, slack: slack)
+        @grants = Grants.new(store: store, slack: slack, notices: notices)
       end
 
       # True when the whole message is an owner's in-channel grant command (authorize, consult, or their undo), so it is
@@ -44,7 +44,7 @@ module Conclave
         if (match = SLASH_AGENT_COMMAND.match(text))
           agent_command(match[:verb].downcase, match[:agent].downcase, payload["channel_id"])
         elsif (match = SLASH_USER_COMMAND.match(text))
-          user_command(match)
+          user_command(match, payload)
         elsif (match = SLASH_CHANNEL_COMMAND.match(text))
           channel_command(match)
         else
@@ -58,14 +58,14 @@ module Conclave
         agent = @store.members(event["channel"]).find { |member| member.casecmp?(match[:agent]) }
         return react(event, "x") unless agent
 
-        refusal = @grants.apply(match[:verb].downcase, agent, match[:user])
+        refusal = @grants.apply(match[:verb].downcase, agent, match[:user], event["channel"])
         react(event, refusal ? "x" : "white_check_mark")
       end
 
-      def user_command(match)
+      def user_command(match, payload)
         agent = match[:agent].downcase
         verb = match[:verb].downcase
-        refusal = @grants.apply(verb, agent, match[:user])
+        refusal = @grants.apply(verb, agent, match[:user], payload["channel_id"])
         refusal || "#{verb.capitalize}#{verb.end_with?('e') ? 'd' : 'ed'} <@#{match[:user]}> for #{agent}."
       end
 

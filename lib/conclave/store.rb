@@ -110,8 +110,10 @@ module Conclave
       @db.execute("INSERT OR REPLACE INTO consults (agent, user_id, bot_id) VALUES (?, ?, ?)", [agent, user_id, bot_id])
     end
 
-    def unconsult(agent, user_id)
+    # True when a grant was removed.
+    def unconsult(agent, user_id) # rubocop:disable Naming/PredicateMethod
       @db.execute("DELETE FROM consults WHERE agent = ? AND user_id = ?", [agent, user_id])
+      @db.changes.positive?
     end
 
     def consults?(agent, bot_id)
