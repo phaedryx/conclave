@@ -15,15 +15,15 @@ module Conclave
         @channel = channel.to_s.strip
       end
 
-      # Returns the channel_id, or nil when the agent is already known or the join failed (reported; the agent
-      # stays unknown, so the next registration tries again).
+      # Returns the channel_id, or nil when the agent has joined before or the join failed (reported; the agent
+      # is not marked, so the next registration tries again).
       def ensure_joined(agent)
-        return if @store.known_agent?(agent)
+        return if @store.common_joined?(agent)
 
         id = channel_id
         ChannelJoin.ensure(@slack, id)
         @store.add_membership(agent, id)
-        @store.remember_agent(agent)
+        @store.mark_common_joined(agent)
         @notices.joined_common(agent, id)
         id
       rescue NotFound, ChannelJoin::Private, Slack::Client::Error => e

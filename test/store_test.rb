@@ -63,6 +63,21 @@ class StoreTest < Minitest::Test
     assert_equal %w[a b], @store.known_agents
   end
 
+  def test_common_joined
+    refute @store.common_joined?("a")
+    @store.mark_common_joined("a")
+    @store.mark_common_joined("a")
+    assert @store.common_joined?("a")
+  end
+
+  def test_remove_after_common_join_sticks
+    @store.add_membership("a", "C1")
+    @store.mark_common_joined("a")
+    @store.remove_membership("a", "C1")
+    assert @store.common_joined?("a")
+    assert_empty @store.memberships("a")
+  end
+
   def test_authorize_round_trip
     refute @store.authorized?("a", "U1")
     @store.authorize("a", "U1")
@@ -126,6 +141,7 @@ class StoreTest < Minitest::Test
     @store.mark_epic_joined("a")
     @store.remember_agent("a")
     @store.remember_agent("b")
+    @store.mark_common_joined("a")
     @store.authorize("a", "U1")
     @store.authorize("b", "U1")
     @store.enqueue("a", { "x" => 1 }, limit: 5)
@@ -135,6 +151,7 @@ class StoreTest < Minitest::Test
     assert_empty @store.memberships("a")
     refute @store.epic_joined?("a")
     refute @store.known_agent?("a")
+    refute @store.common_joined?("a")
     assert_equal %w[b], @store.known_agents
     refute @store.authorized?("a", "U1")
     assert_empty @store.drain("a")

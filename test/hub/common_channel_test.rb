@@ -61,7 +61,7 @@ class CommonChannelTest < Minitest::Test
     assert_equal "CCOM", @common.ensure_joined(A)
     assert_nil @common.ensure_joined(A)
     assert_equal [A], @store.members("CCOM")
-    assert @store.known_agent?(A)
+    assert @store.common_joined?(A)
     assert_requested @join, times: 1
     assert_equal(["tad_sc-1234: you joined #conclave, the common channel."], conn.deliveries.map { |m| m[:text] })
   end
@@ -94,7 +94,21 @@ class CommonChannelTest < Minitest::Test
     list_stub([])
     _, err = capture_io { assert_nil @common.ensure_joined(A) }
     assert_match(/default_channel #conclave not found/, err)
-    refute @store.known_agent?(A)
+    refute @store.common_joined?(A)
+
+    list_stub([{ "id" => "CCOM", "name" => "conclave" }])
+    assert_equal "CCOM", @common.ensure_joined(A)
+  end
+
+  def test_lookup_error_is_reported_and_retried
+    stub_request(:get, "#{SLACK_BASE_URL}/conversations.list")
+      .with(query: LIST_QUERY)
+      .to_return(status: 200, body: { "ok" => false, "error" => "ratelimited" }.to_json,
+                 headers: { "Content-Type" => "application/json" })
+    _, err = capture_io { assert_nil @common.ensure_joined(A) }
+    assert_match(/common channel join failed for tad_sc-1234.*ratelimited/, err)
+    refute @store.common_joined?(A)
+    assert_not_requested @join
 
     list_stub([{ "id" => "CCOM", "name" => "conclave" }])
     assert_equal "CCOM", @common.ensure_joined(A)
@@ -104,7 +118,7 @@ class CommonChannelTest < Minitest::Test
     info_stub(is_private: true, is_member: false)
     _, err = capture_io { assert_nil @common.ensure_joined(A) }
     assert_match(/common channel join failed for tad_sc-1234/, err)
-    refute @store.known_agent?(A)
+    refute @store.common_joined?(A)
     assert_empty @store.memberships(A)
     assert_not_requested(:post, /chat\.postMessage/)
   end
@@ -113,7 +127,7 @@ class CommonChannelTest < Minitest::Test
     stub_slack(:post, "conversations.join", response_body: { "ok" => false, "error" => "ratelimited" })
     _, err = capture_io { assert_nil @common.ensure_joined(A) }
     assert_match(/common channel join failed for tad_sc-1234.*ratelimited/, err)
-    refute @store.known_agent?(A)
+    refute @store.common_joined?(A)
     assert_empty @store.memberships(A)
   end
 end
