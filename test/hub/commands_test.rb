@@ -27,7 +27,14 @@ class CommandsTest < Minitest::Test
     @commands = Conclave::Hub::Commands.new(store: @store, authority: @authority, slack: @slack, owner: "UTAD",
                                             notices: @notices)
     @store.add_membership(A, CH)
+    user_info_stub("UJANE", "is_bot" => false)
   end
+
+  def user_info_stub(user, fields)
+    stub_slack(:get, "users.info", query: { "user" => user }, response_body: { "user" => { "id" => user }.merge(fields) })
+  end
+
+  def taude_stub = user_info_stub("UTAUDE", "is_bot" => true, "profile" => { "bot_id" => "BTAUDE" })
 
   def create_stub(name = "billing-rework")
     stub_slack(:post, "conversations.create", request_body: { name: name, is_private: false },
@@ -227,7 +234,7 @@ class CommandsTest < Minitest::Test
 
   def test_slash_unparseable_returns_usage
     expected = "Usage: /conclave invite <agent> | remove <agent> | channel <name> <agent> [<agent>…] | " \
-               "authorize <agent> @person | deauthorize <agent> @person"
+               "authorize <agent> @person | deauthorize <agent> @person | consult <agent> @bot | unconsult <agent> @bot"
     ["", "frobnicate", "invite", "authorize #{A}", "authorize #{A} jane"].each do |text|
       assert_equal expected, @commands.handle_slash(slash(text))
     end
@@ -259,6 +266,63 @@ class CommandsTest < Minitest::Test
     assert @commands.handle_text(event("tad_sc-9999: authorize <@UJANE>"))
     refute @store.authorized?("tad_sc-9999", "UJANE")
     assert_requested stub
+  end
+
+  def test_slash_consult_and_unconsult
+    taude_stub
+    assert_equal "Consulted <@UTAUDE> for tad_sc-777.", @commands.handle_slash(slash("consult TAD_sc-777 <@UTAUDE>"))
+    assert @store.consults?("tad_sc-777", "BTAUDE")
+    refute @store.authorized?("tad_sc-777", "UTAUDE")
+    assert_equal "Unconsulted <@UTAUDE> for tad_sc-777.", @commands.handle_slash(slash("unconsult tad_sc-777 <@UTAUDE>"))
+    refute @store.consults?("tad_sc-777", "BTAUDE")
+  end
+
+  def test_unconsult_and_deauthorize_do_not_look_up_the_user
+    stub = user_info_stub("UTAUDE", "is_bot" => true)
+    @commands.handle_slash(slash("unconsult #{A} <@UTAUDE>"))
+    @commands.handle_slash(slash("deauthorize #{A} <@UTAUDE>"))
+    assert_not_requested stub
+  end
+
+  def test_in_channel_consult_grants_and_reacts
+    taude_stub
+    stub = reaction_stub("white_check_mark")
+    assert @commands.handle_text(event("#{A}: consult <@UTAUDE>"))
+    assert @store.consults?(A, "BTAUDE")
+    assert_requested stub
+  end
+
+  def test_authorize_refuses_a_bot
+    taude_stub
+    assert_equal "<@UTAUDE> is a bot. Use consult for bots.", @commands.handle_slash(slash("authorize #{A} <@UTAUDE>"))
+    stub = reaction_stub("x")
+    assert @commands.handle_text(event("#{A}: authorize <@UTAUDE>"))
+    assert_requested stub
+    refute @store.authorized?(A, "UTAUDE")
+  end
+
+  def test_consult_refuses_a_person
+    user_info_stub("UJANE", "is_bot" => false, "profile" => { "bot_id" => "BJANE" })
+    assert_equal "<@UJANE> isn't a bot. Use authorize for people.", @commands.handle_slash(slash("consult #{A} <@UJANE>"))
+    refute @store.consults?(A, "BJANE")
+  end
+
+  def test_lookup_without_a_user_refuses
+    stub_slack(:get, "users.info", query: { "user" => "UODD" })
+    assert_equal "Couldn't look up <@UODD>: no user", @commands.handle_slash(slash("authorize #{A} <@UODD>"))
+    refute @store.authorized?(A, "UODD")
+  end
+
+  def test_consult_refuses_a_bot_without_a_bot_id
+    user_info_stub("UTAUDE", "is_bot" => true, "profile" => {})
+    assert_equal "Couldn't find <@UTAUDE>'s bot id.", @commands.handle_slash(slash("consult #{A} <@UTAUDE>"))
+  end
+
+  def test_user_lookup_failure_refuses
+    stub_slack(:get, "users.info", query: { "user" => "UGONE" }, response_body: { "ok" => false, "error" => "user_not_found" })
+    assert_equal "Couldn't look up <@UGONE>: user_not_found", @commands.handle_slash(slash("authorize #{A} <@UGONE>"))
+    assert_equal "Couldn't look up <@UGONE>: user_not_found", @commands.handle_slash(slash("consult #{A} <@UGONE>"))
+    refute @store.authorized?(A, "UGONE")
   end
 
   def test_ordinary_text_is_not_a_command

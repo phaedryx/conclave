@@ -6,7 +6,7 @@ require "uri"
 
 module Conclave
   module Slack
-    class Client
+    class Client # rubocop:disable Metrics/ClassLength
       class Error < StandardError
         # The Slack error code (e.g. "channel_not_found"); nil for HTTP-level failures.
         attr_reader :code
@@ -67,6 +67,10 @@ module Conclave
 
       def add_reaction(channel:, ts:, name:)
         post("reactions.add", channel: channel, timestamp: ts, name: name)
+      end
+
+      def user_info(user:)
+        get("users.info", user: user)
       end
 
       def channel_info(channel:)

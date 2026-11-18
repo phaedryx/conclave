@@ -17,6 +17,12 @@ module Conclave
       CREATE TABLE IF NOT EXISTS grants (
         id INTEGER PRIMARY KEY AUTOINCREMENT, agent TEXT NOT NULL, user_id TEXT NOT NULL,
         UNIQUE (agent, user_id));
+      CREATE TABLE IF NOT EXISTS consults (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, agent TEXT NOT NULL, user_id TEXT NOT NULL, bot_id TEXT NOT NULL,
+        UNIQUE (agent, user_id));
+      CREATE TABLE IF NOT EXISTS agent_threads (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, agent TEXT NOT NULL, channel_id TEXT NOT NULL, thread_ts TEXT NOT NULL,
+        UNIQUE (agent, channel_id, thread_ts));
       CREATE TABLE IF NOT EXISTS queue (
         id INTEGER PRIMARY KEY AUTOINCREMENT, agent TEXT NOT NULL, payload TEXT NOT NULL);
       CREATE INDEX IF NOT EXISTS queue_agent_idx ON queue (agent, id);
@@ -55,7 +61,7 @@ module Conclave
 
     def forget(agent)
       @db.transaction do
-        %w[memberships agents common_joined grants queue agent_authority].each do |table|
+        %w[memberships agents common_joined grants consults agent_threads queue agent_authority].each do |table|
           @db.execute("DELETE FROM #{table} WHERE agent = ?", [agent])
         end
       end
@@ -97,6 +103,36 @@ module Conclave
 
     def authorized_agents(user_id)
       @db.execute("SELECT agent FROM grants WHERE user_id = ? ORDER BY id", [user_id]).flatten
+    end
+
+    # A bot the agent may hear from (see Hub::BotRoute). Matched on bot_id; never a grant of authority.
+    def consult(agent, user_id, bot_id)
+      @db.execute("INSERT OR REPLACE INTO consults (agent, user_id, bot_id) VALUES (?, ?, ?)", [agent, user_id, bot_id])
+    end
+
+    def unconsult(agent, user_id)
+      @db.execute("DELETE FROM consults WHERE agent = ? AND user_id = ?", [agent, user_id])
+    end
+
+    def consults?(agent, bot_id)
+      !@db.get_first_value("SELECT 1 FROM consults WHERE agent = ? AND bot_id = ?", [agent, bot_id]).nil?
+    end
+
+    # A thread the agent has posted in (a top-level post roots its own), keeping the newest `limit` per agent.
+    def record_agent_thread(agent, channel_id, thread_ts, limit:)
+      @db.transaction do
+        @db.execute("INSERT OR IGNORE INTO agent_threads (agent, channel_id, thread_ts) VALUES (?, ?, ?)",
+                    [agent, channel_id, thread_ts])
+        @db.execute(<<~SQL, [agent, agent, limit])
+          DELETE FROM agent_threads WHERE agent = ? AND id NOT IN (
+            SELECT id FROM agent_threads WHERE agent = ? ORDER BY id DESC LIMIT ?)
+        SQL
+      end
+    end
+
+    def agent_thread?(agent, channel_id, thread_ts)
+      !@db.get_first_value("SELECT 1 FROM agent_threads WHERE agent = ? AND channel_id = ? AND thread_ts = ?",
+                           [agent, channel_id, thread_ts]).nil?
     end
 
     def enqueue(agent, payload, limit:)

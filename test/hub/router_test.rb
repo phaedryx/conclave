@@ -183,6 +183,7 @@ class RouterTest < Minitest::Test
   end
 
   def test_in_channel_authorize_consumed_not_delivered
+    stub_slack(:get, "users.info", query: { "user" => "UJANE" }, response_body: { "user" => { "is_bot" => false } })
     @router.handle_message(event("#{A}: authorize <@UJANE>"))
     assert @store.authorized?(A, "UJANE")
     assert_empty @conn_a.deliveries
@@ -234,5 +235,88 @@ class RouterTest < Minitest::Test
     assert_requested(:post, "#{SLACK_BASE_URL}/chat.postMessage") do |req|
       JSON.parse(req.body)["text"] == "Couldn't read linked message #{link}: unavailable"
     end
+  end
+
+  TAUDE = "UTAUDE"
+  TAUDE_BOT = "BTAUDE"
+  THREAD = "1700000000.000001"
+
+  # Taude's chat.postMessage shape: no subtype, user and bot_id both set.
+  def bot_event(text, **extra)
+    event(text, user: TAUDE, "bot_id" => TAUDE_BOT, **extra)
+  end
+
+  def test_consulted_bot_addressing_agent_is_delivered_as_bot
+    @store.consult(A, TAUDE, TAUDE_BOT)
+    @router.handle_message(bot_event("#{A}: here you go"))
+    assert_empty @conn_b.deliveries
+    assert_equal({ channel: "epic-1-x", channel_id: CH, ts: TS, thread_ts: nil, sender: TAUDE,
+                   sender_role: "bot", authority: :none, text: "#{A}: here you go", shared: [] },
+                 @conn_a.deliveries.first)
+    assert_equal TS, @store.last_seen(CH)
+  end
+
+  def test_bot_message_subtype_without_user_is_delivered
+    @store.consult(A, TAUDE, TAUDE_BOT)
+    message = bot_event("#{A}: hi", "subtype" => "bot_message", "username" => "Taude").except("user")
+    @router.handle_message(message)
+    assert_equal([[TAUDE_BOT, "bot"]], @conn_a.deliveries.map { |m| [m[:sender], m[:sender_role]] })
+  end
+
+  def test_consulted_bot_reply_in_agent_thread_is_delivered_only_to_that_agent
+    @store.consult(A, TAUDE, TAUDE_BOT)
+    @store.consult(B, TAUDE, TAUDE_BOT)
+    @store.record_agent_thread(A, CH, THREAD, limit: 10)
+    @router.handle_message(bot_event("The answer is 42.", "thread_ts" => THREAD))
+    assert_equal(["The answer is 42."], @conn_a.deliveries.map { |m| m[:text] })
+    assert_equal :none, @conn_a.deliveries.first[:authority]
+    assert_empty @conn_b.deliveries
+  end
+
+  def test_consulted_bot_reply_in_other_thread_is_dropped
+    @store.consult(A, TAUDE, TAUDE_BOT)
+    @store.record_agent_thread(A, CH, "1600000000.000001", limit: 10)
+    @router.handle_message(bot_event("The answer is 42.", "thread_ts" => THREAD))
+    assert_empty @conn_a.deliveries
+  end
+
+  def test_unconsulted_bot_is_dropped
+    @store.consult(B, TAUDE, TAUDE_BOT)
+    @store.record_agent_thread(A, CH, THREAD, limit: 10)
+    @router.handle_message(bot_event("#{A}: hi", "thread_ts" => THREAD))
+    assert_empty @conn_a.deliveries
+  end
+
+  def test_bot_with_old_authorize_grant_is_not_delivered_as_authorized
+    @store.authorize(A, TAUDE)
+    @router.handle_message(bot_event("#{A}: delete the branch"))
+    assert_empty @conn_a.deliveries
+  end
+
+  def test_bot_text_command_is_not_run
+    @store.consult(A, TAUDE, TAUDE_BOT)
+    @router.handle_message(bot_event("#{A}: authorize <@UEVIL>").merge("user" => "UTAD"))
+    refute @store.authorized?(A, "UEVIL")
+    assert_equal(["bot"], @conn_a.deliveries.map { |m| m[:sender_role] })
+  end
+
+  def test_bot_post_does_not_reset_loop_guard
+    agents = Conclave::Hub::Agents.new(store: @store, authority: @authority, slack: @slack,
+                                       loop_guard_limit: 1, queue_limit: 50)
+    router = Conclave::Hub::Router.new(agents: agents, authority: @authority, store: @store, slack: @slack,
+                                       bot_id: "BHUB", commands: @commands)
+    conn_b = FakeConnection.new
+    agents.register(B, conn_b)
+    @store.authorize(A, TAUDE)
+    2.times { agents.post(agent: A, channel_id: CH, text: "#{B}: ping", thread_ts: THREAD) }
+    router.handle_message(bot_event("noise", "thread_ts" => THREAD))
+    agents.post(agent: A, channel_id: CH, text: "#{B}: ping", thread_ts: THREAD)
+    assert_equal 1, conn_b.deliveries.size
+  end
+
+  def test_bot_message_changed_is_ignored
+    @store.consult(A, TAUDE, TAUDE_BOT)
+    @router.handle_message(bot_event("#{A}: hi", "subtype" => "message_changed"))
+    assert_empty @conn_a.deliveries
   end
 end

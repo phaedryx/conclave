@@ -163,8 +163,22 @@ module Conclave
         authority = @authority.combine(@ledger.current(agent), @ledger.replied(agent, in_reply_to_ts))
         @ledger.posted(agent, authority)
         @store.record_post_authority(channel_id, ts, authority)
+        @store.record_agent_thread(agent, channel_id, thread_ts || ts, limit: DELIVERED_LIMIT)
         route_to_peers(Post.new(agent, channel_id, text, thread_ts, ts, authority))
         { ts: ts }
+      end
+
+      # A consulted bot's message (see Router). It counts against the loop guard like an agent-to-agent delivery, so
+      # an agent and a bot answering each other pause at the limit; nothing a bot posts ever resets the guard.
+      def deliver_from_bot(agent, message)
+        key = message[:thread_ts] || Post.channel_key(message[:channel_id])
+        if @guard.blocked?(key)
+          post_pause_note(message[:channel_id], message[:thread_ts]) if @guard.first_block?(key)
+          return
+        end
+
+        @guard.record(key)
+        deliver(agent, message)
       end
 
       # A post from the owner or an authorized person resets its thread and the channel's top-level count.
@@ -223,20 +237,20 @@ module Conclave
       def blocked_by_guard?(post)
         return false unless @guard.blocked?(post.guard_key)
 
-        post_pause_note(post) if @guard.first_block?(post.guard_key)
+        post_pause_note(post.channel_id, post.thread_ts) if @guard.first_block?(post.guard_key)
         true
       end
 
-      def post_pause_note(post)
-        response = @slack.post_message(channel: post.channel_id, thread_ts: post.thread_ts, username: NOTE_USERNAME,
-                                       text: pause_note(post))
-        @store.record_post_authority(post.channel_id, response["ts"], @authority.owner) if response["ts"]
+      def post_pause_note(channel_id, thread_ts)
+        response = @slack.post_message(channel: channel_id, thread_ts: thread_ts, username: NOTE_USERNAME,
+                                       text: pause_note(thread_ts))
+        @store.record_post_authority(channel_id, response["ts"], @authority.owner) if response["ts"]
       rescue Slack::Client::Error => e
-        Agents.report("pause note failed for #{post.channel_id}/#{post.thread_ts || 'top level'}: #{e.message}")
+        Agents.report("pause note failed for #{channel_id}/#{thread_ts || 'top level'}: #{e.message}")
       end
 
-      def pause_note(post)
-        if post.thread_ts
+      def pause_note(thread_ts)
+        if thread_ts
           "Pausing agent-to-agent messages in this thread after #{@loop_guard_limit} exchanges. " \
             "@tad, reply here to continue."
         else

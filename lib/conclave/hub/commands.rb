@@ -6,12 +6,13 @@ module Conclave
     class Commands
       ONLY_OWNER = "Only Tad can do that."
       USAGE = "Usage: /conclave invite <agent> | remove <agent> | channel <name> <agent> [<agent>…] | " \
-              "authorize <agent> @person | deauthorize <agent> @person"
+              "authorize <agent> @person | deauthorize <agent> @person | consult <agent> @bot | unconsult <agent> @bot"
       PRIVATE_CHANNEL = "Add the Conclave app to this private channel first."
       BAD_CHANNEL_NAME = "Channel names are lowercase letters, numbers, hyphens and underscores, up to 80 characters."
       USER_REF = /<@(?<user>[UW][A-Z0-9]+)(?:\|[^>]*)?>/
-      TEXT_COMMAND = /\A\s*(?<agent>[\w-]+)\s*:\s*(?<verb>authorize|deauthorize)\s+#{USER_REF}\s*\z/i
-      SLASH_USER_COMMAND = /\A(?<verb>authorize|deauthorize)\s+(?<agent>\S+)\s+#{USER_REF}\s*\z/i
+      GRANT_VERB = /authorize|deauthorize|consult|unconsult/
+      TEXT_COMMAND = /\A\s*(?<agent>[\w-]+)\s*:\s*(?<verb>#{GRANT_VERB})\s+#{USER_REF}\s*\z/i
+      SLASH_USER_COMMAND = /\A(?<verb>#{GRANT_VERB})\s+(?<agent>\S+)\s+#{USER_REF}\s*\z/i
       SLASH_AGENT_COMMAND = /\A(?<verb>invite|remove)\s+(?<agent>\S+)\s*\z/i
       SLASH_CHANNEL_COMMAND = /\Achannel\s+(?<name>\S+)\s+(?<agents>\S+(?:\s+\S+)*)\s*\z/i
       CHANNEL_NAME = /\A[a-z0-9_-]{1,80}\z/
@@ -22,9 +23,11 @@ module Conclave
         @slack = slack
         @owner = owner
         @notices = notices
+        @grants = Grants.new(store: store, slack: slack)
       end
 
-      # True when the whole message is an owner's in-channel authorize/deauthorize command, so it is consumed.
+      # True when the whole message is an owner's in-channel grant command (authorize, consult, or their undo), so it is
+      # consumed.
       # One command per message; a message that merely contains one is delivered normally.
       def handle_text(event) # rubocop:disable Naming/PredicateMethod
         return false unless event["user"] == @owner
@@ -55,18 +58,15 @@ module Conclave
         agent = @store.members(event["channel"]).find { |member| member.casecmp?(match[:agent]) }
         return react(event, "x") unless agent
 
-        apply_grant(match[:verb], agent, match[:user])
-        react(event, "white_check_mark")
+        refusal = @grants.apply(match[:verb].downcase, agent, match[:user])
+        react(event, refusal ? "x" : "white_check_mark")
       end
 
       def user_command(match)
         agent = match[:agent].downcase
-        apply_grant(match[:verb], agent, match[:user])
-        "#{match[:verb].capitalize}d <@#{match[:user]}> for #{agent}."
-      end
-
-      def apply_grant(verb, agent, user)
-        verb.casecmp?("authorize") ? @store.authorize(agent, user) : @store.deauthorize(agent, user)
+        verb = match[:verb].downcase
+        refusal = @grants.apply(verb, agent, match[:user])
+        refusal || "#{verb.capitalize}#{verb.end_with?('e') ? 'd' : 'ed'} <@#{match[:user]}> for #{agent}."
       end
 
       def agent_command(verb, agent, channel_id)

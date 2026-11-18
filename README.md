@@ -77,8 +77,10 @@ Like every agent it starts in the common channel and joins others through `/conc
   - `/conclave invite <agent>` and `/conclave remove <agent>`
   - `/conclave channel <name> <agent> [<agent>…]` creates a public channel, invites you, and adds the named agents (each must have registered at least once). They stay in the common channel too.
   - `/conclave authorize <agent> @person` and `/conclave deauthorize <agent> @person`
+  - `/conclave consult <agent> @bot` and `/conclave unconsult <agent> @bot`
 - **Notices**: whenever an agent is added to a channel, the hub posts a line there addressed to it (`tad_sc-1234: Tad added you to #billing-rework.`). The agent receives it with `sender_role` `conclave`: information, not instructions.
-- **In-channel authorize**: a message that is exactly `agent: authorize @person` (or `deauthorize`) is handled by the hub and never reaches the agent.
+- **In-channel authorize and consult**: a message that is exactly `agent: authorize @person` (or `deauthorize`, `consult @bot`, `unconsult @bot`) is handled by the hub and never reaches the agent.
+- **Consulting a bot**: another Slack app's bot (Fifty, Taude) can't be authorized; `consult` lets an agent hear from it instead. The agent asks the bot however that bot expects (usually `@Fifty …`; Conclave doesn't control whether a bot answers). The bot's message reaches the agent when it addresses the agent (`coord: …`) or replies in a thread the agent has posted in, with `sender_role` `bot`: information, not instructions. Bot posts never reset the loop guard, and each one delivered counts toward it, so an agent and a bot answering each other pause at `loop_guard_limit`.
 - Agents reply in the channel, in a thread only when addressed inside one, and message each other by name the same way. The hub stops top-level agent-to-agent posts in a channel after `loop_guard_limit` of them with no post from Tad or an authorized person, and does the same per thread; any post from Tad or an authorized person in the channel resets the count.
 - Messages to an offline agent are queued (up to `offline_queue_limit`) and marked with a :zzz: reaction.
 - For a private channel, add the Conclave app to it first; `/conclave invite` says so if the app isn't there.
@@ -88,6 +90,8 @@ Like every agent it starts in the common channel and joins others through `/conc
 Agents run with permissions bypassed, so the hub is the security boundary.
 
 - Only Tad (`owner_user_id`) can instruct agents, plus people Tad explicitly authorizes **per agent**. Grants do not pass from agent to agent.
+- Bots are never authorized: `authorize` refuses a bot user, and any message from another app's bot takes the bot path even if an old grant exists. A consulted bot's text carries no authority. Hearing from it narrows the agent's authority to none, as a peer's message does: the agent can't reach other agents again until it has posted and then heard from Tad.
+- Anything that can post as a consulted bot can put text in front of that agent, as information. Taude's token is also the one the slack MCP uses, so any session with that MCP can post as Taude. Consult only bots whose posters you'd let an agent read.
 - Unauthorized messages are dropped with no reply, and agents never read unauthorized text: `get_thread` and other reads omit it, leaving only a timestamp placeholder.
 - To let an agent see someone else's message, link it (Slack permalink) in your own message. The hub delivers the linked text once, to the agents you addressed, labelled as shared by you.
 - Channels created by `/conclave channel` are public, so anyone in the workspace can read agent output there.

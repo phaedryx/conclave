@@ -484,4 +484,58 @@ class AgentsTest < Minitest::Test
     2.times { agents.post(agent: A, channel_id: CH, text: "#{B}: ping", thread_ts: "50.0") }
     assert_equal "UTAD", @store.post_authority(CH, "100.1")
   end
+
+  def bot_delivery(overrides = {})
+    delivery({ sender: "UTAUDE", sender_role: "bot", authority: :none, thread_ts: "50.0" }.merge(overrides))
+  end
+
+  def test_post_records_agent_thread
+    @agents.post(agent: A, channel_id: CH, text: "top level")
+    @agents.post(agent: A, channel_id: CH, text: "in thread", thread_ts: "50.0")
+    assert @store.agent_thread?(A, CH, "100.1")
+    assert @store.agent_thread?(A, CH, "50.0")
+    refute @store.agent_thread?(B, CH, "50.0")
+  end
+
+  def test_bot_delivery_pauses_after_limit
+    agents = build_agents(limit: 2)
+    agents.register(A, @conn_a)
+    3.times { |i| agents.deliver_from_bot(A, bot_delivery(ts: "51.#{i}")) }
+    assert_equal 2, @conn_a.deliveries.size
+    notes = posted_bodies.select { |b| b["username"] == "conclave" }
+    assert_equal 1, notes.size
+    assert_equal "50.0", notes.first["thread_ts"]
+    agents.deliver_from_bot(A, bot_delivery(ts: "51.9"))
+    assert_equal(1, posted_bodies.count { |b| b["username"] == "conclave" })
+  end
+
+  def test_top_level_bot_deliveries_count_against_the_channel
+    agents = build_agents(limit: 1)
+    agents.register(A, @conn_a)
+    agents.deliver_from_bot(A, bot_delivery(ts: "51.1", thread_ts: nil))
+    agents.deliver_from_bot(A, bot_delivery(ts: "51.2", thread_ts: nil))
+    assert_equal 1, @conn_a.deliveries.size
+  end
+
+  # Same rule as a peer message: the owner's next message only narrows; the agent posts, then the owner widens.
+  def test_bot_delivery_requires_post_then_owner_to_reach_peers
+    @agents.register(A, @conn_a)
+    @agents.register(B, @conn_b)
+    @agents.deliver_from_bot(A, bot_delivery(ts: "1"))
+    @agents.deliver(A, delivery(ts: "2"))
+    @agents.post(agent: A, channel_id: CH, text: "#{B}: go")
+    assert_empty @conn_b.deliveries
+    @agents.deliver(A, delivery(ts: "3"))
+    @agents.post(agent: A, channel_id: CH, text: "#{B}: go")
+    assert_equal(["UTAD"], @conn_b.deliveries.map { |m| m[:authority] })
+  end
+
+  def test_offline_bot_delivery_queues_with_none_authority
+    reaction = stub_slack(:post, "reactions.add", request_body: hash_including("timestamp" => "1", "name" => "zzz"))
+    @agents.deliver_from_bot(A, bot_delivery(ts: "1"))
+    assert_requested reaction
+    assert_equal :none, @store.agent_authority(A)
+    @agents.register(A, @conn_a)
+    assert_equal([["bot", :none]], @conn_a.deliveries.map { |m| [m[:sender_role], m[:authority]] })
+  end
 end

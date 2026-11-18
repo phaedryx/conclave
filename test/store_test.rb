@@ -67,6 +67,27 @@ class StoreTest < Minitest::Test
     assert_equal %w[b], @store.authorized_agents("U1")
   end
 
+  def test_consult_round_trip
+    refute @store.consults?("a", "B1")
+    @store.consult("a", "U1", "B1")
+    @store.consult("a", "U1", "B1")
+    assert @store.consults?("a", "B1")
+    refute @store.consults?("b", "B1")
+    refute @store.consults?("a", "B2")
+    @store.unconsult("a", "U1")
+    refute @store.consults?("a", "B1")
+  end
+
+  def test_record_agent_thread_caps_per_agent
+    @store.record_agent_thread("b", "C1", "1.0", limit: 2)
+    %w[1.0 2.0 3.0].each { |ts| @store.record_agent_thread("a", "C1", ts, limit: 2) }
+    refute @store.agent_thread?("a", "C1", "1.0")
+    assert @store.agent_thread?("a", "C1", "2.0")
+    assert @store.agent_thread?("a", "C1", "3.0")
+    refute @store.agent_thread?("a", "C2", "3.0")
+    assert @store.agent_thread?("b", "C1", "1.0")
+  end
+
   def test_enqueue_and_drain_fifo
     @store.enqueue("a", { "text" => "one", "n" => 1 }, limit: 10)
     @store.enqueue("a", { text: "two" }, limit: 10)
@@ -122,7 +143,15 @@ class StoreTest < Minitest::Test
     @store.authorize("b", "U1")
     @store.enqueue("a", { "x" => 1 }, limit: 5)
     @store.set_agent_authority("a", "U1")
+    @store.consult("a", "U2", "B2")
+    @store.consult("b", "U2", "B2")
+    @store.record_agent_thread("a", "C1", "1.0", limit: 5)
+    @store.record_agent_thread("b", "C1", "1.0", limit: 5)
     @store.forget("a")
+    refute @store.consults?("a", "B2")
+    refute @store.agent_thread?("a", "C1", "1.0")
+    assert @store.consults?("b", "B2")
+    assert @store.agent_thread?("b", "C1", "1.0")
     assert_nil @store.agent_authority("a")
     assert_empty @store.memberships("a")
     refute @store.known_agent?("a")

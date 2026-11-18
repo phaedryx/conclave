@@ -3,7 +3,7 @@
 module Conclave
   class Hub
     # Routes Slack message events to agents. A message reaches an agent only when it addresses that agent
-    # and the sender is the owner or authorized for it. Everything else is dropped silently.
+    # and the sender is the owner or authorized for it. Other apps' bots go to BotRoute. Everything else is dropped.
     class Router
       TS_FORMAT = /\A\d{10}\.\d{6}\z/
       NOTE_USERNAME = "conclave"
@@ -20,9 +20,11 @@ module Conclave
         @commands = commands
         @owner = authority.owner
         @channel_names = ChannelNames.new(slack)
+        @bots = BotRoute.new(agents: agents, store: store, channel_names: @channel_names, bot_id: bot_id)
       end
 
       def handle_message(event)
+        return @bots.handle(event) if @bots.handles?(event)
         return if ignored?(event)
 
         channel = event["channel"]
