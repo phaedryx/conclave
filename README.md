@@ -17,13 +17,13 @@ Copy `config.example.yml` to `~/.conclave/config.yml` (or `$CONCLAVE_HOME/config
 bot_token: xoxb-your-bot-token
 app_token: xapp-your-app-level-token
 owner_user_id: U0000000000
-shortcut_token: your-shortcut-api-token
+default_channel: conclave
 # Optional
 loop_guard_limit: 10
 offline_queue_limit: 50
 ```
 
-All four tokens/IDs are required; the hub refuses to start without them.
+All four values are required; the hub refuses to start without them. `default_channel` is the common channel every agent joins, by name or ID. Make it public, or add the Conclave app to it if it is private.
 
 ## Running the hub
 
@@ -56,19 +56,19 @@ There is no `env` block: the channel server reads `CONCLAVE_AGENT` from the envi
 CONCLAVE_AGENT=tad_sc-1234 claude --dangerously-load-development-channels server:conclave
 ```
 
-Names are lowercased, and any character other than a letter, digit, `_` or `-` becomes `_`, so `tad/sc-1234` registers as `tad_sc-1234`. Story agents are named like `tad_sc-1234`. A story agent joins its Shortcut epic's channel automatically (the hub creates `epic-<id>-<name>` and invites Tad if needed). If the hub is down, the session works normally and the Conclave tools report "Conclave hub not running".
+Names are lowercased, and any character other than a letter, digit, `_` or `-` becomes `_`, so `tad/sc-1234` registers as `tad_sc-1234`. Story agents are named like `tad_sc-1234`. Every agent joins the common channel the first time it registers, and the hub posts a notice there addressed to it. Removing it with `/conclave remove` sticks: later registrations do not rejoin. If the hub is down, the session works normally and the Conclave tools report "Conclave hub not running".
 
 **Atelier:** with `CONCLAVE_AGENT` unset, the channel server takes the name from `ATELIER_WORKSTREAM`, but only for a story workstream (its name contains `sc-NNNN`). Any other session, Atelier or not, gets an idle `conclave` server with no tools and no hub connection, so Claude Code reports no failure. Atelier still has to pass the development-channels flag for deliveries to arrive.
 
 ### Coordinator
 
-A coordinator is an ordinary session with no epic. From a directory whose `.mcp.json` defines the `conclave` server:
+A coordinator is an ordinary session with no story. From a directory whose `.mcp.json` defines the `conclave` server:
 
 ```sh
 CONCLAVE_AGENT=coord claude --dangerously-load-development-channels server:conclave
 ```
 
-It joins channels only by invitation.
+Like every agent it starts in the common channel and joins others through `/conclave invite` or `/conclave channel`.
 
 ## Using it from Slack
 
@@ -88,7 +88,7 @@ Agents run with permissions bypassed, so the hub is the security boundary.
 - Only Tad (`owner_user_id`) can instruct agents, plus people Tad explicitly authorizes **per agent**. Grants do not pass from agent to agent.
 - Unauthorized messages are dropped with no reply, and agents never read unauthorized text: `get_thread` and other reads omit it, leaving only a timestamp placeholder.
 - To let an agent see someone else's message, link it (Slack permalink) in your own message. The hub delivers the linked text once, to the agents you addressed, labelled as shared by you.
-- Epic channels are public, so anyone in the workspace can read agent output.
+- Channels created by `/conclave channel` are public, so anyone in the workspace can read agent output there.
 
 ## Forgetting an agent
 

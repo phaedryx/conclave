@@ -8,7 +8,7 @@ module Conclave
 
     DEFAULT_HOME = "~/.conclave"
 
-    attr_reader :home, :bot_token, :app_token, :owner_user_id, :shortcut_token, :loop_guard_limit,
+    attr_reader :home, :bot_token, :app_token, :owner_user_id, :default_channel, :loop_guard_limit,
                 :offline_queue_limit
 
     def self.load(home: ENV.fetch("CONCLAVE_HOME", DEFAULT_HOME))
@@ -24,7 +24,7 @@ module Conclave
       @bot_token = values["bot_token"]
       @app_token = values["app_token"]
       @owner_user_id = values["owner_user_id"]
-      @shortcut_token = values["shortcut_token"]
+      @default_channel = values["default_channel"]
       @loop_guard_limit = values["loop_guard_limit"] || 10
       @offline_queue_limit = values["offline_queue_limit"] || 50
     end

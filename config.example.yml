@@ -2,7 +2,7 @@
 bot_token: xoxb-your-bot-token
 app_token: xapp-your-app-level-token
 owner_user_id: U0000000000
-shortcut_token: your-shortcut-api-token
+default_channel: conclave # the common channel every agent joins, by name or ID
 # Optional
 loop_guard_limit: 10
 offline_queue_limit: 50

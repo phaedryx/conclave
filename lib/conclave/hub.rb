@@ -4,14 +4,14 @@ require "fileutils"
 require "socket"
 
 module Conclave
-  # The hub process: wires the store, Slack and Shortcut clients, routing, the agent socket server and
-  # Socket Mode together. One Mutex serializes every Slack callback, socket request and the startup backfill.
+  # The hub process: wires the store, the Slack client, routing, the agent socket server and Socket Mode
+  # together. One Mutex serializes every Slack callback, socket request and the startup backfill.
   class Hub # rubocop:disable Metrics/ClassLength
     ConfigError = Class.new(StandardError)
     AlreadyRunning = Class.new(StandardError)
     AppTokenRejected = Class.new(StandardError)
 
-    REQUIRED = %w[bot_token app_token owner_user_id shortcut_token].freeze
+    REQUIRED = %w[bot_token app_token owner_user_id default_channel].freeze
     BACKFILL_LIMIT = 200
     SHUTDOWN_JOIN_TIMEOUT = 2
 
@@ -104,13 +104,13 @@ module Conclave
       authority = Authority.new(owner: config.owner_user_id, store: @store)
       @agents = Agents.new(store: @store, authority: authority, slack: @slack,
                            loop_guard_limit: config.loop_guard_limit, queue_limit: config.offline_queue_limit)
+      notices = Notices.new(agents: @agents, slack: @slack, store: @store, owner: config.owner_user_id)
       commands = Commands.new(store: @store, authority: authority, slack: @slack, owner: config.owner_user_id)
       @router = Router.new(agents: @agents, authority: authority, store: @store, slack: @slack, bot_id: bot_id,
                            commands: commands)
-      shortcut = Shortcut::Client.new(token: config.shortcut_token)
-      epics = EpicChannels.new(store: @store, slack: @slack, shortcut: shortcut, owner: config.owner_user_id)
+      common = CommonChannel.new(store: @store, slack: @slack, notices: notices, channel: config.default_channel)
       handler = Handler.new(agents: @agents, store: @store, slack: @slack, authority: authority,
-                            epic_channels: epics, bot_id: bot_id, lock: @lock)
+                            common_channel: common, bot_id: bot_id, lock: @lock)
       @server = Server.new(path: config.socket_path, handler: handler)
       @socket_mode = Slack::SocketMode.new(
         slack: Slack::Client.new(token: config.app_token, sleep_on_rate_limit: false),

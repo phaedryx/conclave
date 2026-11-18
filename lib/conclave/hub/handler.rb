@@ -13,11 +13,11 @@ module Conclave
       BAD_REQUEST = { ok: false, error: "bad request" }.freeze
 
       # rubocop:disable-next Metrics/ParameterLists
-      def initialize(agents:, store:, slack:, authority:, epic_channels:, bot_id:, lock:)
+      def initialize(agents:, store:, slack:, authority:, common_channel:, bot_id:, lock:)
         @agents = agents
         @store = store
         @slack = slack
-        @epic_channels = epic_channels
+        @common_channel = common_channel
         @lock = lock
         @channel_names = ChannelNames.new(slack)
         @thread_filter = ThreadFilter.new(authority: authority, bot_id: bot_id, store: store)
@@ -65,7 +65,8 @@ module Conclave
         raise Refusal, "name_taken" if @agents.register(name, connection) == :name_taken
 
         @registered[connection] = name
-        join_epic(name)
+        @store.remember_agent(name)
+        join_common(name)
         {}
       end
 
@@ -104,10 +105,10 @@ module Conclave
         { agents: @store.members(channel_id).map { |name| { name: name, online: @agents.online?(name) } } }
       end
 
-      def join_epic(name)
-        @epic_channels.ensure_joined(name)
+      def join_common(name)
+        @common_channel.ensure_joined(name)
       rescue StandardError => e
-        Agents.report("epic join failed for #{name}: #{e.class}: #{e.message}")
+        Agents.report("common channel join failed for #{name}: #{e.class}: #{e.message}")
       end
 
       def resolve_channel(agent, channel)
