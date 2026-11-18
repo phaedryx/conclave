@@ -15,6 +15,7 @@ module Conclave
         id INTEGER PRIMARY KEY AUTOINCREMENT, agent TEXT NOT NULL, channel_id TEXT NOT NULL,
         UNIQUE (agent, channel_id));
       CREATE TABLE IF NOT EXISTS epic_joined (agent TEXT PRIMARY KEY);
+      CREATE TABLE IF NOT EXISTS agents (agent TEXT PRIMARY KEY);
       CREATE TABLE IF NOT EXISTS grants (
         id INTEGER PRIMARY KEY AUTOINCREMENT, agent TEXT NOT NULL, user_id TEXT NOT NULL,
         UNIQUE (agent, user_id));
@@ -61,7 +62,7 @@ module Conclave
 
     def forget(agent)
       @db.transaction do
-        %w[memberships epic_joined grants queue agent_authority].each do |table|
+        %w[memberships epic_joined agents grants queue agent_authority].each do |table|
           @db.execute("DELETE FROM #{table} WHERE agent = ?", [agent])
         end
       end
@@ -73,6 +74,19 @@ module Conclave
 
     def epic_joined?(agent)
       !@db.get_first_value("SELECT 1 FROM epic_joined WHERE agent = ?", [agent]).nil?
+    end
+
+    # Every agent that has joined the common channel: the joined-once marker and the list /conclave channel accepts.
+    def remember_agent(agent)
+      @db.execute("INSERT OR IGNORE INTO agents (agent) VALUES (?)", [agent])
+    end
+
+    def known_agent?(agent)
+      !@db.get_first_value("SELECT 1 FROM agents WHERE agent = ?", [agent]).nil?
+    end
+
+    def known_agents
+      @db.execute("SELECT agent FROM agents ORDER BY agent").flatten
     end
 
     def authorize(agent, user_id)

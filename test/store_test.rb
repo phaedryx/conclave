@@ -54,6 +54,15 @@ class StoreTest < Minitest::Test
     assert_empty @store.memberships("a")
   end
 
+  def test_known_agents
+    refute @store.known_agent?("b")
+    @store.remember_agent("b")
+    @store.remember_agent("b")
+    @store.remember_agent("a")
+    assert @store.known_agent?("b")
+    assert_equal %w[a b], @store.known_agents
+  end
+
   def test_authorize_round_trip
     refute @store.authorized?("a", "U1")
     @store.authorize("a", "U1")
@@ -115,6 +124,8 @@ class StoreTest < Minitest::Test
     @store.add_membership("a", "C1")
     @store.add_membership("b", "C1")
     @store.mark_epic_joined("a")
+    @store.remember_agent("a")
+    @store.remember_agent("b")
     @store.authorize("a", "U1")
     @store.authorize("b", "U1")
     @store.enqueue("a", { "x" => 1 }, limit: 5)
@@ -123,6 +134,8 @@ class StoreTest < Minitest::Test
     assert_nil @store.agent_authority("a")
     assert_empty @store.memberships("a")
     refute @store.epic_joined?("a")
+    refute @store.known_agent?("a")
+    assert_equal %w[b], @store.known_agents
     refute @store.authorized?("a", "U1")
     assert_empty @store.drain("a")
     assert_equal %w[b], @store.members("C1")
