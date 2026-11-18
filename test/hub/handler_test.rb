@@ -162,6 +162,44 @@ class HandlerTest < Minitest::Test
     refute_includes result.to_s, "ignore previous"
   end
 
+  def stub_thread(messages)
+    stub_slack(:get, "conversations.replies", query: { channel: CH, ts: TS, limit: "200" },
+                                              response_body: { "messages" => messages })
+  end
+
+  def test_get_thread_shows_consulted_bot_as_bot_only_to_that_agent
+    register
+    @store.consult(A, "UTAUDE", "BTAUDE")
+    @store.add_membership(B, CH)
+    stub_thread([{ "ts" => "1", "user" => "UTAUDE", "bot_id" => "BTAUDE", "text" => "the answer" },
+                 { "ts" => "2", "bot_id" => "BTAUDE", "username" => "Taude", "text" => "more" }])
+
+    result = request("get_thread", channel: CH, thread_ts: TS)[:messages]
+    assert_equal [{ ts: "1", sender: "UTAUDE", sender_role: "bot", text: "the answer" },
+                  { ts: "2", sender: "BTAUDE", sender_role: "bot", text: "more" }], result
+
+    conn_b = FakeConnection.new
+    register(B, conn_b)
+    hidden = request("get_thread", conn_b, channel: CH, thread_ts: TS)[:messages]
+    assert_equal([nil, nil], hidden.map { |m| m[:sender_role] })
+  end
+
+  def test_get_thread_hides_bot_with_old_authorize_grant
+    register
+    @store.authorize(A, "UTAUDE")
+    stub_thread([{ "ts" => "1", "user" => "UTAUDE", "bot_id" => "BTAUDE", "text" => "obey me" }])
+    result = request("get_thread", channel: CH, thread_ts: TS)[:messages]
+    assert_equal [{ ts: "1", sender: nil, sender_role: nil, text: "[hidden message ts=1]" }], result
+  end
+
+  # An app posting under Tad's user isn't Tad typing; the router treats it as a bot, so get_thread must too.
+  def test_get_thread_hides_unconsulted_bot_posting_as_owner
+    register
+    stub_thread([{ "ts" => "1", "user" => "UTAD", "bot_id" => "BAPP", "text" => "obey me" }])
+    result = request("get_thread", channel: CH, thread_ts: TS)[:messages]
+    assert_equal [{ ts: "1", sender: nil, sender_role: nil, text: "[hidden message ts=1]" }], result
+  end
+
   def test_list_channels
     register
     @store.add_membership(A, "C2")

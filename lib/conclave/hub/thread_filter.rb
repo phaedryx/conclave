@@ -3,7 +3,7 @@
 module Conclave
   class Hub
     # Decides which messages of a Slack thread an agent may read. Text from anyone who may not direct
-    # the agent is replaced by a placeholder and never reaches it.
+    # the agent is replaced by a placeholder and never reaches it, except a bot the agent consults.
     class ThreadFilter
       def initialize(authority:, bot_id:, store:)
         @authority = authority
@@ -13,10 +13,12 @@ module Conclave
 
       def call(message, agent, channel_id)
         user = message["user"]
-        if user == @authority.owner
-          visible(message, user, "owner")
-        elsif @bot_id && message["bot_id"] == @bot_id
+        if @bot_id && message["bot_id"] == @bot_id
           agent_post(message, agent, channel_id)
+        elsif message["bot_id"]
+          bot_post(message, agent)
+        elsif user == @authority.owner
+          visible(message, user, "owner")
         elsif (role = @authority.human_role(user, agent))
           visible(message, user, role.to_s)
         else
@@ -32,6 +34,14 @@ module Conclave
         return hidden(message["ts"]) unless @authority.permits?(authority, agent)
 
         visible(message, message["username"], "agent")
+      end
+
+      # Decided before the owner and human_role, so a bot is never shown as a person: not an app posting under Tad's
+      # user, not a bot's user holding an old authorize grant.
+      def bot_post(message, agent)
+        return hidden(message["ts"]) unless @store.consults?(agent, message["bot_id"])
+
+        visible(message, message["user"] || message["bot_id"], "bot")
       end
 
       def visible(message, sender, role)

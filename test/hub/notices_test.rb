@@ -54,6 +54,27 @@ class NoticesTest < Minitest::Test
     end
   end
 
+  CONSULTED = "tad_sc-1234: Tad lets you consult Fifty (Slack user UFIFTY). Mention it to ask; its replies in your " \
+              "threads reach you."
+
+  def test_consulted_names_the_bot_without_mentioning_it
+    @agents.register(A, @conn_a)
+    @notices.consulted(A, "Fifty", "UFIFTY", CH)
+    assert_requested(:post, "#{SLACK_BASE_URL}/chat.postMessage") do |req|
+      body = JSON.parse(req.body)
+      body["username"] == "conclave" && body["channel"] == CH && body["text"] == CONSULTED
+    end
+    refute_includes CONSULTED, "<@"
+    assert_equal([["conclave", "UTAD", CONSULTED]], @conn_a.deliveries.map { |m| m.values_at(:sender_role, :authority, :text) })
+  end
+
+  def test_unconsulted_falls_back_to_the_id_without_a_name
+    @agents.register(A, @conn_a)
+    @notices.unconsulted(A, nil, "UFIFTY", CH)
+    assert_equal(["tad_sc-1234: Tad stopped your consult of Slack user UFIFTY. Its messages no longer reach you."],
+                 @conn_a.deliveries.map { |m| m[:text] })
+  end
+
   def test_notice_is_recorded_with_owner_authority
     @notices.added([A], CH)
     assert_equal "UTAD", @store.post_authority(CH, "7.7")

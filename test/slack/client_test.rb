@@ -34,6 +34,12 @@ class SlackClientTest < Minitest::Test
     assert_requested stub
   end
 
+  def test_user_info
+    stub_slack(:get, "users.info", query: { "user" => "U1" },
+                                   response_body: { "user" => { "is_bot" => true, "profile" => { "bot_id" => "B1" } } })
+    assert_equal "B1", @client.user_info(user: "U1").dig("user", "profile", "bot_id")
+  end
+
   def test_auth_test
     stub_slack(:post, "auth.test", response_body: { "user_id" => "UBOT" })
     assert_equal "UBOT", @client.auth_test["user_id"]
