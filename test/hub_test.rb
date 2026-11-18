@@ -26,7 +26,7 @@ class HubTest < Minitest::Test
   def setup
     @dir = Dir.mktmpdir("cvhub")
     @config = Conclave::Config.new({ "bot_token" => "xoxb-1", "app_token" => "xapp-1", "owner_user_id" => "UTAD",
-                                     "shortcut_token" => "sc-token" }, home: @dir)
+                                     "default_channel" => "conclave" }, home: @dir)
     stub_slack(:post, "auth.test", response_body: { "bot_id" => "BHUB", "user" => "conclave" })
   end
 
@@ -58,8 +58,8 @@ class HubTest < Minitest::Test
   end
 
   def test_blank_credentials_fail_fast_with_clear_message
-    %w[bot_token app_token owner_user_id shortcut_token].each do |key|
-      values = { "bot_token" => "a", "app_token" => "b", "owner_user_id" => "c", "shortcut_token" => "d", key => " " }
+    %w[bot_token app_token owner_user_id default_channel].each do |key|
+      values = { "bot_token" => "a", "app_token" => "b", "owner_user_id" => "c", "default_channel" => "d", key => " " }
       error = assert_raises(Conclave::Hub::ConfigError) do
         Conclave::Hub.new(config: Conclave::Config.new(values, home: @dir))
       end
@@ -142,6 +142,35 @@ class HubTest < Minitest::Test
     end
     refute File.exist?(@config.socket_path)
     assert_raises(ArgumentError) { hub.store.last_seen("C1") } # store closed
+  end
+
+  def test_first_registration_over_the_socket_joins_the_common_channel
+    stub_slack(:post, "apps.connections.open", status: 500)
+    stub_slack(:get, "conversations.list", query: hash_including("types" => "public_channel,private_channel"),
+                                           response_body: { "channels" => [{ "id" => "CCOM", "name" => "conclave" }],
+                                                            "response_metadata" => { "next_cursor" => "" } })
+    stub_slack(:get, "conversations.info", query: { channel: "CCOM" },
+                                           response_body: { "channel" => { "id" => "CCOM", "name" => "conclave",
+                                                                           "is_private" => false } })
+    join = stub_slack(:post, "conversations.join", request_body: hash_including("channel" => "CCOM"))
+    stub_slack(:post, "chat.postMessage", response_body: { "ts" => "3.3" })
+    capture_io do
+      @thread = Thread.new { hub.run }
+      Timeout.timeout(5) { sleep 0.05 until File.socket?(@config.socket_path) }
+      sock = UNIXSocket.new(@config.socket_path)
+      Conclave::Protocol.write(sock, { id: 1, op: "register", agent: AGENT })
+      messages = Array.new(2) { Conclave::Protocol.read(sock) } # the notice is pushed before the register reply
+      assert_equal true, messages.find { |m| m.key?("ok") }["ok"]
+      push = messages.find { |m| m["op"] == "deliver" }
+      assert_equal "conclave", push.dig("message", "sender_role")
+      assert_equal "tad_sc-1234: you joined #conclave, the common channel.", push.dig("message", "text")
+      assert_equal(["CCOM"], hub.synchronize { hub.store.memberships(AGENT) })
+      assert(hub.synchronize { hub.store.known_agent?(AGENT) })
+      sock.close
+      Process.kill("TERM", Process.pid)
+      assert @thread.join(5)
+    end
+    assert_requested join
   end
 
   def test_run_exits_with_a_clear_error_when_slack_rejects_the_app_token

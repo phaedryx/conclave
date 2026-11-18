@@ -23,7 +23,7 @@ class HandlerTest < Minitest::Test
     end
   end
 
-  class FakeEpics
+  class FakeCommonChannel
     attr_reader :joined
 
     def initialize
@@ -42,9 +42,9 @@ class HandlerTest < Minitest::Test
     @slack = Conclave::Slack::Client.new(token: "xoxb-test")
     @agents = Conclave::Hub::Agents.new(store: @store, authority: @authority, slack: @slack,
                                         loop_guard_limit: 10, queue_limit: 50)
-    @epics = FakeEpics.new
+    @common = FakeCommonChannel.new
     @handler = Conclave::Hub::Handler.new(agents: @agents, store: @store, slack: @slack, authority: @authority,
-                                          epic_channels: @epics, bot_id: "BHUB", lock: Mutex.new)
+                                          common_channel: @common, bot_id: "BHUB", lock: Mutex.new)
     @store.add_membership(A, CH)
     @store.add_membership(B, CH)
     @conn = FakeConnection.new
@@ -60,10 +60,16 @@ class HandlerTest < Minitest::Test
     request("register", connection, agent: agent)
   end
 
-  def test_register_ok_and_joins_epic
+  def test_register_ok_and_joins_common_channel
     assert_equal({ id: 1, ok: true }, register)
     assert @agents.online?(A)
-    assert_equal [A], @epics.joined
+    assert_equal [A], @common.joined
+  end
+
+  def test_register_records_the_agent_as_known
+    register
+    assert @store.known_agent?(A)
+    assert_equal [A], @store.known_agents
   end
 
   def test_register_name_taken
@@ -86,15 +92,16 @@ class HandlerTest < Minitest::Test
     end
   end
 
-  def test_register_survives_epic_slack_error
-    epics = Object.new
-    def epics.ensure_joined(_agent) = raise(Conclave::Slack::Client::Error, "slack down")
+  def test_register_survives_common_channel_slack_error
+    common = Object.new
+    def common.ensure_joined(_agent) = raise(Conclave::Slack::Client::Error, "slack down")
     handler = Conclave::Hub::Handler.new(agents: @agents, store: @store, slack: @slack, authority: @authority,
-                                         epic_channels: epics, bot_id: "BHUB", lock: Mutex.new)
+                                         common_channel: common, bot_id: "BHUB", lock: Mutex.new)
     response = nil
     capture_io { response = handler.call({ "id" => 1, "op" => "register", "agent" => A }, @conn) }
     assert_equal true, response[:ok]
     assert @agents.online?(A)
+    assert @store.known_agent?(A)
   end
 
   def test_send_message_posts_as_registered_agent_by_id_and_name
@@ -211,11 +218,11 @@ class HandlerTest < Minitest::Test
     assert @agents.online?(A)
   end
 
-  def test_register_survives_non_slack_epic_error
-    epics = Object.new
-    def epics.ensure_joined(_agent) = raise("surprise")
+  def test_register_survives_non_slack_common_channel_error
+    common = Object.new
+    def common.ensure_joined(_agent) = raise("surprise")
     handler = Conclave::Hub::Handler.new(agents: @agents, store: @store, slack: @slack, authority: @authority,
-                                         epic_channels: epics, bot_id: "BHUB", lock: Mutex.new)
+                                         common_channel: common, bot_id: "BHUB", lock: Mutex.new)
     response = nil
     capture_io { response = handler.call({ "id" => 1, "op" => "register", "agent" => A }, @conn) }
     assert_equal true, response[:ok]

@@ -8,8 +8,8 @@ features:
     always_online: true
   slash_commands:
     - command: /conclave
-      description: Invite, remove, or authorize Conclave agents
-      usage_hint: "invite <agent> | remove <agent> | authorize <agent> @person | deauthorize <agent> @person"
+      description: Invite, remove, or authorize Conclave agents, or open a channel for some of them
+      usage_hint: "invite <agent> | remove <agent> | channel <name> <agent> [<agent>…] | authorize <agent> @person | deauthorize <agent> @person"
       should_escape: true
 oauth_config:
   scopes:

@@ -6,13 +6,13 @@ class ConfigTest < Minitest::Test
   def test_loads_values_and_defaults
     Dir.mktmpdir do |dir|
       File.write(File.join(dir, "config.yml"), {
-        "bot_token" => "xoxb-1", "app_token" => "xapp-1", "owner_user_id" => "U1", "shortcut_token" => "sc"
+        "bot_token" => "xoxb-1", "app_token" => "xapp-1", "owner_user_id" => "U1", "default_channel" => "conclave"
       }.to_yaml)
       config = Conclave::Config.load(home: dir)
       assert_equal "xoxb-1", config.bot_token
       assert_equal "xapp-1", config.app_token
       assert_equal "U1", config.owner_user_id
-      assert_equal "sc", config.shortcut_token
+      assert_equal "conclave", config.default_channel
       assert_equal File.join(dir, "hub.sock"), config.socket_path
       assert_equal File.join(dir, "conclave.sqlite3"), config.db_path
       assert_equal 10, config.loop_guard_limit

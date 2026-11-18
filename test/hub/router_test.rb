@@ -29,7 +29,9 @@ class RouterTest < Minitest::Test
     @slack = Conclave::Slack::Client.new(token: "xoxb-test")
     @agents = Conclave::Hub::Agents.new(store: @store, authority: @authority, slack: @slack,
                                         loop_guard_limit: 10, queue_limit: 50)
-    @commands = Conclave::Hub::Commands.new(store: @store, authority: @authority, slack: @slack, owner: "UTAD")
+    notices = Conclave::Hub::Notices.new(agents: @agents, slack: @slack, store: @store, owner: "UTAD")
+    @commands = Conclave::Hub::Commands.new(store: @store, authority: @authority, slack: @slack, owner: "UTAD",
+                                            notices: notices)
     @router = Conclave::Hub::Router.new(agents: @agents, authority: @authority, store: @store, slack: @slack,
                                         bot_id: "BHUB", commands: @commands)
     @store.add_membership(A, CH)
@@ -51,6 +53,15 @@ class RouterTest < Minitest::Test
   def test_ignores_own_bot_echo
     @router.handle_message(event("#{A}: hi", "bot_id" => "BHUB"))
     assert_empty @conn_a.deliveries
+  end
+
+  # A hub notice starts with an addressing prefix; Slack's echo of it must not be delivered a second time.
+  def test_ignores_echo_of_a_hub_notice
+    echo = event("#{A}, #{B}: Tad added you to #epic-1-x.", "subtype" => "bot_message", "bot_id" => "BHUB",
+                                                            "username" => "conclave").except("user")
+    @router.handle_message(echo)
+    assert_empty @conn_a.deliveries
+    assert_empty @conn_b.deliveries
   end
 
   def test_ignores_subtype_and_missing_user

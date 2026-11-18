@@ -7,14 +7,6 @@ class StoreTest < Minitest::Test
     @store = Conclave::Store.new(":memory:")
   end
 
-  def test_epic_channel_round_trip
-    assert_nil @store.epic_channel(42)
-    @store.set_epic_channel(42, "C1")
-    assert_equal "C1", @store.epic_channel(42)
-    @store.set_epic_channel(42, "C2")
-    assert_equal "C2", @store.epic_channel(42)
-  end
-
   def test_memberships_round_trip_in_insertion_order
     @store.add_membership("a", "C2")
     @store.add_membership("a", "C1")
@@ -39,18 +31,27 @@ class StoreTest < Minitest::Test
     assert_nil @store.post_authority("C2", "1.1")
   end
 
-  def test_epic_joined
-    refute @store.epic_joined?("a")
-    @store.mark_epic_joined("a")
-    @store.mark_epic_joined("a")
-    assert @store.epic_joined?("a")
+  def test_known_agents
+    refute @store.known_agent?("b")
+    @store.remember_agent("b")
+    @store.remember_agent("b")
+    @store.remember_agent("a")
+    assert @store.known_agent?("b")
+    assert_equal %w[a b], @store.known_agents
   end
 
-  def test_remove_after_epic_join_sticks
+  def test_common_joined
+    refute @store.common_joined?("a")
+    @store.mark_common_joined("a")
+    @store.mark_common_joined("a")
+    assert @store.common_joined?("a")
+  end
+
+  def test_remove_after_common_join_sticks
     @store.add_membership("a", "C1")
-    @store.mark_epic_joined("a")
+    @store.mark_common_joined("a")
     @store.remove_membership("a", "C1")
-    assert @store.epic_joined?("a")
+    assert @store.common_joined?("a")
     assert_empty @store.memberships("a")
   end
 
@@ -114,7 +115,9 @@ class StoreTest < Minitest::Test
   def test_forget_clears_everything
     @store.add_membership("a", "C1")
     @store.add_membership("b", "C1")
-    @store.mark_epic_joined("a")
+    @store.remember_agent("a")
+    @store.remember_agent("b")
+    @store.mark_common_joined("a")
     @store.authorize("a", "U1")
     @store.authorize("b", "U1")
     @store.enqueue("a", { "x" => 1 }, limit: 5)
@@ -122,11 +125,29 @@ class StoreTest < Minitest::Test
     @store.forget("a")
     assert_nil @store.agent_authority("a")
     assert_empty @store.memberships("a")
-    refute @store.epic_joined?("a")
+    refute @store.known_agent?("a")
+    refute @store.common_joined?("a")
+    assert_equal %w[b], @store.known_agents
     refute @store.authorized?("a", "U1")
     assert_empty @store.drain("a")
     assert_equal %w[b], @store.members("C1")
     assert @store.authorized?("b", "U1")
+  end
+
+  def test_opening_drops_epic_channel_tables
+    Dir.mktmpdir do |dir|
+      path = File.join(dir, "conclave.db")
+      legacy = SQLite3::Database.new(path)
+      legacy.execute_batch(<<~SQL)
+        CREATE TABLE epic_channels (epic_id INTEGER PRIMARY KEY, channel_id TEXT NOT NULL);
+        CREATE TABLE epic_joined (agent TEXT PRIMARY KEY);
+        INSERT INTO epic_joined VALUES ('a');
+      SQL
+      legacy.close
+      refute Conclave::Store.new(path).common_joined?("a")
+      tables = SQLite3::Database.new(path).execute("SELECT name FROM sqlite_master WHERE type = 'table'").flatten
+      assert_empty tables & %w[epic_channels epic_joined]
+    end
   end
 
   def test_file_db_persists

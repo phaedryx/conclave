@@ -26,10 +26,10 @@ class HubConnectionTest < Minitest::Test
     slack = Conclave::Slack::Client.new(token: "xoxb-test")
     agents = Conclave::Hub::Agents.new(store: store, authority: authority, slack: slack,
                                        loop_guard_limit: 10, queue_limit: 50)
-    epics = Object.new
-    def epics.ensure_joined(_agent) = nil
+    common = Object.new
+    def common.ensure_joined(_agent) = nil
     handler = Conclave::Hub::Handler.new(agents: agents, store: store, slack: slack, authority: authority,
-                                         epic_channels: epics, bot_id: "BHUB", lock: Mutex.new)
+                                         common_channel: common, bot_id: "BHUB", lock: Mutex.new)
     store.add_membership(A, "C1")
     Conclave::Hub::Server.new(path: @path, handler: handler)
   end

@@ -9,12 +9,11 @@ module Conclave
     BUSY_TIMEOUT_MS = 5000
 
     SCHEMA = <<~SQL
-      CREATE TABLE IF NOT EXISTS epic_channels (
-        epic_id INTEGER PRIMARY KEY, channel_id TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS memberships (
         id INTEGER PRIMARY KEY AUTOINCREMENT, agent TEXT NOT NULL, channel_id TEXT NOT NULL,
         UNIQUE (agent, channel_id));
-      CREATE TABLE IF NOT EXISTS epic_joined (agent TEXT PRIMARY KEY);
+      CREATE TABLE IF NOT EXISTS agents (agent TEXT PRIMARY KEY);
+      CREATE TABLE IF NOT EXISTS common_joined (agent TEXT PRIMARY KEY);
       CREATE TABLE IF NOT EXISTS grants (
         id INTEGER PRIMARY KEY AUTOINCREMENT, agent TEXT NOT NULL, user_id TEXT NOT NULL,
         UNIQUE (agent, user_id));
@@ -26,6 +25,9 @@ module Conclave
       CREATE TABLE IF NOT EXISTS post_authority (
         channel_id TEXT NOT NULL, ts TEXT NOT NULL, authority TEXT NOT NULL, PRIMARY KEY (channel_id, ts));
       CREATE TABLE IF NOT EXISTS agent_authority (agent TEXT PRIMARY KEY, authority TEXT NOT NULL);
+      -- Epic channels were replaced by the common channel (2026-11); nothing reads these tables any more.
+      DROP TABLE IF EXISTS epic_channels;
+      DROP TABLE IF EXISTS epic_joined;
     SQL
 
     def initialize(path)
@@ -33,14 +35,6 @@ module Conclave
       @db.busy_timeout = BUSY_TIMEOUT_MS
       @db.execute("PRAGMA journal_mode = WAL") unless path == ":memory:"
       @db.execute_batch(SCHEMA)
-    end
-
-    def epic_channel(epic_id)
-      @db.get_first_value("SELECT channel_id FROM epic_channels WHERE epic_id = ?", [epic_id])
-    end
-
-    def set_epic_channel(epic_id, channel_id)
-      @db.execute("INSERT OR REPLACE INTO epic_channels (epic_id, channel_id) VALUES (?, ?)", [epic_id, channel_id])
     end
 
     def add_membership(agent, channel_id)
@@ -61,18 +55,32 @@ module Conclave
 
     def forget(agent)
       @db.transaction do
-        %w[memberships epic_joined grants queue agent_authority].each do |table|
+        %w[memberships agents common_joined grants queue agent_authority].each do |table|
           @db.execute("DELETE FROM #{table} WHERE agent = ?", [agent])
         end
       end
     end
 
-    def mark_epic_joined(agent)
-      @db.execute("INSERT OR IGNORE INTO epic_joined (agent) VALUES (?)", [agent])
+    # Every agent that has ever registered: the names /conclave channel accepts.
+    def remember_agent(agent)
+      @db.execute("INSERT OR IGNORE INTO agents (agent) VALUES (?)", [agent])
     end
 
-    def epic_joined?(agent)
-      !@db.get_first_value("SELECT 1 FROM epic_joined WHERE agent = ?", [agent]).nil?
+    def known_agent?(agent)
+      !@db.get_first_value("SELECT 1 FROM agents WHERE agent = ?", [agent]).nil?
+    end
+
+    def known_agents
+      @db.execute("SELECT agent FROM agents ORDER BY agent").flatten
+    end
+
+    # The joined-once marker for the common channel, kept after /conclave remove so the agent is not rejoined.
+    def mark_common_joined(agent)
+      @db.execute("INSERT OR IGNORE INTO common_joined (agent) VALUES (?)", [agent])
+    end
+
+    def common_joined?(agent)
+      !@db.get_first_value("SELECT 1 FROM common_joined WHERE agent = ?", [agent]).nil?
     end
 
     def authorize(agent, user_id)
