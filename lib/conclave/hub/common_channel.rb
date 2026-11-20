@@ -4,21 +4,23 @@ module Conclave
   class Hub
     # The channel every agent joins on its first registration. Configured by name or ID; a name is looked up once.
     # An agent that has joined is remembered, so a later registration does not rejoin: /conclave remove sticks.
+    # With auto_join off, registration joins nothing; Tad brings agents in with /conclave invite or channel.
     class CommonChannel
       NotFound = Class.new(StandardError)
       ID_PATTERN = /\A[CG][A-Z0-9]+\z/
 
-      def initialize(store:, slack:, notices:, channel:)
+      def initialize(store:, slack:, notices:, channel:, auto_join: true)
         @store = store
         @slack = slack
         @notices = notices
         @channel = channel.to_s.strip
+        @auto_join = auto_join
       end
 
-      # Returns the channel_id, or nil when the agent has joined before or the join failed (reported; the agent
-      # is not marked, so the next registration tries again).
+      # Returns the channel_id, or nil when auto_join is off, the agent has joined before or the join failed
+      # (reported; the agent is not marked, so the next registration tries again).
       def ensure_joined(agent)
-        return if @store.common_joined?(agent)
+        return if !@auto_join || @store.common_joined?(agent)
 
         id = channel_id
         ChannelJoin.ensure(@slack, id)

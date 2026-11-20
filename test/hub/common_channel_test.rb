@@ -42,6 +42,17 @@ class CommonChannelTest < Minitest::Test
     Conclave::Hub::CommonChannel.new(store: @store, slack: @slack, notices: @notices, channel: channel)
   end
 
+  def test_auto_join_off_joins_nothing_and_leaves_the_marker_alone
+    common = Conclave::Hub::CommonChannel.new(store: @store, slack: @slack, notices: @notices, channel: "conclave",
+                                              auto_join: false)
+    assert_nil common.ensure_joined(A)
+    assert_empty @store.memberships(A)
+    refute @store.common_joined?(A)
+    assert_not_requested @page1
+    assert_not_requested @join
+    assert_not_requested :post, "#{SLACK_BASE_URL}/chat.postMessage"
+  end
+
   def info_stub(is_private:, is_member:)
     stub_slack(:get, "conversations.info", query: { channel: "CCOM" },
                                            response_body: { "channel" => { "name" => "conclave", "is_private" => is_private,

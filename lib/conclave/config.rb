@@ -9,7 +9,7 @@ module Conclave
     DEFAULT_HOME = "~/.conclave"
 
     attr_reader :home, :bot_token, :app_token, :owner_user_id, :default_channel, :loop_guard_limit,
-                :offline_queue_limit
+                :offline_queue_limit, :auto_join_common
 
     def self.load(home: ENV.fetch("CONCLAVE_HOME", DEFAULT_HOME))
       expanded = File.expand_path(home)
@@ -27,6 +27,8 @@ module Conclave
       @default_channel = values["default_channel"]
       @loop_guard_limit = values["loop_guard_limit"] || 10
       @offline_queue_limit = values["offline_queue_limit"] || 50
+      @auto_join_common = values["auto_join_common"]
+      @auto_join_common = true if @auto_join_common.nil? # not `|| true`: that would turn false into true
     end
 
     def socket_path

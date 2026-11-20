@@ -2,7 +2,8 @@
 bot_token: xoxb-your-bot-token
 app_token: xapp-your-app-level-token
 owner_user_id: U0000000000
-default_channel: conclave # the common channel every agent joins, by name or ID
+default_channel: conclave # the common channel, by name or ID
 # Optional
 loop_guard_limit: 10
 offline_queue_limit: 50
+auto_join_common: true # false: agents join no channel until invited with /conclave invite or /conclave channel

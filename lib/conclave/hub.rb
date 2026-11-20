@@ -97,6 +97,9 @@ module Conclave
     def validate!(config)
       blank = REQUIRED.select { |key| config.public_send(key).to_s.strip.empty? }
       raise ConfigError, "config is missing: #{blank.join(', ')}" unless blank.empty?
+      return if [true, false].include?(config.auto_join_common)
+
+      raise ConfigError, "auto_join_common must be true or false, not #{config.auto_join_common.inspect}"
     end
 
     # rubocop:disable-next Metrics/AbcSize, Metrics/MethodLength
@@ -109,7 +112,8 @@ module Conclave
                               notices: notices)
       @router = Router.new(agents: @agents, authority: authority, store: @store, slack: @slack, bot_id: bot_id,
                            commands: commands)
-      common = CommonChannel.new(store: @store, slack: @slack, notices: notices, channel: config.default_channel)
+      common = CommonChannel.new(store: @store, slack: @slack, notices: notices, channel: config.default_channel,
+                                 auto_join: config.auto_join_common)
       handler = Handler.new(agents: @agents, store: @store, slack: @slack, authority: authority,
                             common_channel: common, bot_id: bot_id, lock: @lock)
       @server = Server.new(path: config.socket_path, handler: handler)

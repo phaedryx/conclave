@@ -17,7 +17,13 @@ class ConfigTest < Minitest::Test
       assert_equal File.join(dir, "conclave.sqlite3"), config.db_path
       assert_equal 10, config.loop_guard_limit
       assert_equal 50, config.offline_queue_limit
+      assert_equal true, config.auto_join_common
     end
+  end
+
+  def test_auto_join_common_false_is_kept_and_nil_means_true
+    assert_equal false, Conclave::Config.new({ "auto_join_common" => false }, home: "/tmp/x").auto_join_common
+    assert_equal true, Conclave::Config.new({ "auto_join_common" => nil }, home: "/tmp/x").auto_join_common
   end
 
   def test_overrides_limits
