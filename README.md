@@ -21,9 +21,12 @@ default_channel: conclave
 # Optional
 loop_guard_limit: 10
 offline_queue_limit: 50
+auto_join_common: true
 ```
 
-All four values are required; the hub refuses to start without them. `default_channel` is the common channel every agent joins, by name or ID. Make it public, or add the Conclave app to it if it is private.
+The first four values are required; the hub refuses to start without them. `default_channel` is the common channel, by name or ID. Make it public, or add the Conclave app to it if it is private.
+
+`auto_join_common` (default `true`) puts every agent in the common channel the first time it registers. Set it to `false` to choose which agents appear in Slack: registering then only records the agent as known and online, and it joins no channel until you add it with `/conclave invite` or `/conclave channel`. An agent in no channel can't post, read threads or reach other agents. The value must be `true` or `false`; anything else stops the hub at startup. Turning it back on later joins every agent not yet marked as having joined the common channel automatically, on its next registration. That includes agents you invited there by hand while it was off, and ones you invited and then removed.
 
 ## Running the hub
 
@@ -56,7 +59,7 @@ There is no `env` block: the channel server reads `CONCLAVE_AGENT` from the envi
 CONCLAVE_AGENT=tad_sc-1234 claude --dangerously-load-development-channels server:conclave
 ```
 
-Names are lowercased, and any character other than a letter, digit, `_` or `-` becomes `_`, so `tad/sc-1234` registers as `tad_sc-1234`. Story agents are named like `tad_sc-1234`. Every agent joins the common channel the first time it registers, and the hub posts a notice there addressed to it. Removing it with `/conclave remove` sticks: later registrations do not rejoin. If the hub is down, the session works normally and the Conclave tools report "Conclave hub not running".
+Names are lowercased, and any character other than a letter, digit, `_` or `-` becomes `_`, so `tad/sc-1234` registers as `tad_sc-1234`. Story agents are named like `tad_sc-1234`. Every agent joins the common channel the first time it registers, and the hub posts a notice there addressed to it. Removing it with `/conclave remove` sticks: later registrations do not rejoin. With `auto_join_common: false` registration joins no channel and posts nothing; the agent waits until you invite it. If the hub is down, the session works normally and the Conclave tools report "Conclave hub not running".
 
 **Atelier:** with `CONCLAVE_AGENT` unset, the channel server takes the name from `ATELIER_WORKSTREAM`, but only for a story workstream (its name contains `sc-NNNN`). Any other session, Atelier or not, gets an idle `conclave` server with no tools and no hub connection, so Claude Code reports no failure. Atelier still has to pass the development-channels flag for deliveries to arrive.
 
@@ -68,14 +71,14 @@ A coordinator is an ordinary session with no story. From a directory whose `.mcp
 CONCLAVE_AGENT=coord claude --dangerously-load-development-channels server:conclave
 ```
 
-Like every agent it starts in the common channel and joins others through `/conclave invite` or `/conclave channel`.
+Like every agent it starts in the common channel (unless `auto_join_common` is off, in which case you invite it) and joins others through `/conclave invite` or `/conclave channel`.
 
 ## Using it from Slack
 
 - **Address an agent** by starting the message with its name and a colon: `coord: look at the failing build`. Several agents: `coord, tad_sc-1234: hello`. Every agent in the channel: `all: hello`. Names are case-insensitive and must begin the message; a message that addresses no agent is dropped, and Slack `@` mentions are not used.
 - **Slash command** (Tad only), run in the target channel:
   - `/conclave invite <agent>` and `/conclave remove <agent>`
-  - `/conclave channel <name> <agent> [<agent>…]` creates a public channel, invites you, and adds the named agents (each must have registered at least once). They stay in the common channel too.
+  - `/conclave channel <name> <agent> [<agent>…]` creates a public channel, invites you, and adds the named agents (each must have registered at least once). Agents already in the common channel stay there too.
   - `/conclave authorize <agent> @person` and `/conclave deauthorize <agent> @person`
   - `/conclave consult <agent> @bot` and `/conclave unconsult <agent> @bot`
 - **Notices**: whenever an agent is added to a channel, the hub posts a line there addressed to it (`tad_sc-1234: Tad added you to #billing-rework.`). The agent receives it with `sender_role` `conclave`: information, not instructions.

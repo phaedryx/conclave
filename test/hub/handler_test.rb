@@ -133,6 +133,15 @@ class HandlerTest < Minitest::Test
     assert_equal "not a member of C999", request("list_agents", channel: "C999")[:error]
   end
 
+  def test_agent_with_no_memberships_cannot_post_or_read
+    register("loner")
+    assert_equal({ id: 1, ok: true, channels: [] }, request("list_channels"))
+    assert_equal "not a member of C1", request("send_message", channel: CH, text: "hi")[:error]
+    assert_equal "not a member of #epic-1-x", request("send_message", channel: "#epic-1-x", text: "hi")[:error]
+    assert_equal "not a member of C1", request("get_thread", channel: CH, thread_ts: TS)[:error]
+    assert_equal "not a member of C1", request("list_agents", channel: CH)[:error]
+  end
+
   def test_get_thread_hides_unauthorized_humans
     register
     @store.authorize(A, "UFRIEND")

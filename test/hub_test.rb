@@ -67,6 +67,16 @@ class HubTest < Minitest::Test
     end
   end
 
+  def test_non_boolean_auto_join_common_fails_fast
+    values = { "bot_token" => "a", "app_token" => "b", "owner_user_id" => "c", "default_channel" => "d" }
+    ["false", 0, "no"].each do |bad|
+      error = assert_raises(Conclave::Hub::ConfigError) do
+        Conclave::Hub.new(config: Conclave::Config.new(values.merge("auto_join_common" => bad), home: @dir))
+      end
+      assert_equal "auto_join_common must be true or false, not #{bad.inspect}", error.message
+    end
+  end
+
   def test_synchronize_uses_the_hub_lock
     result = hub.synchronize { :inside }
     assert_equal :inside, result
@@ -171,6 +181,29 @@ class HubTest < Minitest::Test
       assert @thread.join(5)
     end
     assert_requested join
+  end
+
+  def test_registration_joins_nothing_when_auto_join_common_is_off
+    @config = Conclave::Config.new({ "bot_token" => "xoxb-1", "app_token" => "xapp-1", "owner_user_id" => "UTAD",
+                                     "default_channel" => "conclave", "auto_join_common" => false }, home: @dir)
+    stub_slack(:post, "apps.connections.open", status: 500)
+    capture_io do
+      @thread = Thread.new { hub.run }
+      Timeout.timeout(5) { sleep 0.05 until File.socket?(@config.socket_path) }
+      sock = UNIXSocket.new(@config.socket_path)
+      Conclave::Protocol.write(sock, { id: 1, op: "register", agent: AGENT })
+      assert_equal({ "id" => 1, "ok" => true }, Conclave::Protocol.read(sock))
+      assert_empty(hub.synchronize { hub.store.memberships(AGENT) })
+      refute(hub.synchronize { hub.store.common_joined?(AGENT) })
+      assert(hub.synchronize { hub.store.known_agent?(AGENT) })
+      assert(hub.synchronize { hub.agents.online?(AGENT) })
+      sock.close
+      Process.kill("TERM", Process.pid)
+      assert @thread.join(5)
+    end
+    assert_not_requested :get, %r{#{SLACK_BASE_URL}/conversations\.list}
+    assert_not_requested :post, "#{SLACK_BASE_URL}/conversations.join"
+    assert_not_requested :post, "#{SLACK_BASE_URL}/chat.postMessage"
   end
 
   def test_run_exits_with_a_clear_error_when_slack_rejects_the_app_token
